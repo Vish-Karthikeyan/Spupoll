@@ -104,6 +104,7 @@ async function init() {
 
 function renderQuestion() {
   if (current >= questions.length) {
+    hide("screen-question");
     if (phase === "pre") {
       show("screen-waiting");
       document.getElementById("w-session-title").textContent = session.title;
