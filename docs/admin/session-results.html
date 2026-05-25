@@ -392,93 +392,88 @@ function renderNetShift(el, slide) {
 }
 
 function renderSankey(el, slide) {
-  el.innerHTML = `<div id="sankey-wrap" style="width:100%;height:260px;"></div>`;
-  // Delay so container has painted and clientWidth is available
+  el.innerHTML = `<div id="sankey-wrap" style="width:100%;height:280px;"></div>`;
   setTimeout(() => {
-    const q      = slide.question;
-    const resps  = slide.responses;
-    const labels = getLabels(q);
-
-    const preMap  = Object.fromEntries(resps.filter(r=>r.phase==="pre").map(r=>[r.device_id, binVal(q, r.value)]));
-    const postMap = Object.fromEntries(resps.filter(r=>r.phase==="post").map(r=>[r.device_id, binVal(q, r.value)]));
+    const q = slide.question, resps = slide.responses, labels = getLabels(q);
+    const preMap  = Object.fromEntries(resps.filter(r=>r.phase==="pre").map(r=>[r.device_id, binVal(q,r.value)]));
+    const postMap = Object.fromEntries(resps.filter(r=>r.phase==="post").map(r=>[r.device_id, binVal(q,r.value)]));
 
     const flows = {};
     Object.keys(preMap).forEach(d => {
       if (!postMap[d]) return;
-      const src = preMap[d], tgt = postMap[d];
-      if (!labels.includes(src) || !labels.includes(tgt)) return;
-      const key = `${src}->${tgt}`;
-      flows[key] = (flows[key] || 0) + 1;
+      const s = preMap[d], t = postMap[d];
+      if (!labels.includes(s) || !labels.includes(t)) return;
+      const k = `${s}->${t}`; flows[k] = (flows[k]||0)+1;
     });
 
     const wrap = document.getElementById("sankey-wrap");
     if (!Object.keys(flows).length) {
-      wrap.innerHTML = `<p style="text-align:center;color:var(--spu-grey);padding:60px 0 0;">No paired pre/post responses available.</p>`;
+      wrap.innerHTML = `<p style="text-align:center;color:var(--spu-grey);padding:60px 0;">No paired pre/post responses.</p>`;
       return;
     }
 
-    // Only include nodes that appear in actual flows (avoids empty-node stacking)
-    const usedPre = new Set(), usedPost = new Set();
-    Object.keys(flows).forEach(k => { const [s,t]=k.split("->"); usedPre.add(s); usedPost.add(t); });
-    const preNodes  = labels.filter(l => usedPre.has(l));
-    const postNodes = labels.filter(l => usedPost.has(l));
-    const allNodes  = [
-      ...preNodes.map(l => ({ name: l })),
-      ...postNodes.map(l => ({ name: l })),
-    ];
-    const preIdx  = Object.fromEntries(preNodes.map((l,i) => [l, i]));
-    const postIdx = Object.fromEntries(postNodes.map((l,i) => [l, preNodes.length + i]));
+    // Per-node totals
+    const srcC = {}, tgtC = {};
+    Object.entries(flows).forEach(([k,v])=>{ const [s,t]=k.split("->"); srcC[s]=(srcC[s]||0)+v; tgtC[t]=(tgtC[t]||0)+v; });
 
-    const links = Object.entries(flows).map(([key, val]) => {
-      const [src, tgt] = key.split("->");
-      const sI = labels.indexOf(src), tI = labels.indexOf(tgt);
-      const dir = tI > sI ? "up" : tI < sI ? "down" : "same";
-      return {
-        source: preIdx[src],
-        target: postIdx[tgt],
-        value:  val,
-        color:  dir==="up" ? "rgba(140,21,21,0.5)" : dir==="down" ? "rgba(83,74,183,0.5)" : "rgba(100,100,100,0.3)",
-      };
-    });
+    const W = wrap.clientWidth || 700, H = 260;
+    const PAD = 60, NW = 18, GAP = 10, MAX_H = 80;
+    const maxC = Math.max(...Object.values(srcC), ...Object.values(tgtC));
+    const scale = MAX_H / maxC;
 
-    const W = wrap.clientWidth || 700, H = 250;
-    const svg = d3.select(wrap).append("svg").attr("width",W).attr("height",H).attr("class","sankey-svg");
+    function layoutCol(lbls, counts, x) {
+      const hs = lbls.map(l => Math.max(6, (counts[l]||0)*scale));
+      const tot = hs.reduce((a,b)=>a+b,0) + GAP*(lbls.length-1);
+      let y = (H - tot) / 2;
+      return lbls.map((l,i) => { const node={label:l,x,y,h:hs[i],count:counts[l]||0}; y+=hs[i]+GAP; return node; });
+    }
 
-    const sankey = d3.sankey().nodeWidth(16).nodePadding(14)
-      .extent([[60, 20],[W-60, H-10]]);
+    const srcLbls = labels.filter(l=>srcC[l]), tgtLbls = labels.filter(l=>tgtC[l]);
+    const srcNodes = layoutCol(srcLbls, srcC, PAD);
+    const tgtNodes = layoutCol(tgtLbls, tgtC, W-PAD-NW);
+    const sByL = Object.fromEntries(srcNodes.map(n=>[n.label,n]));
+    const tByL = Object.fromEntries(tgtNodes.map(n=>[n.label,n]));
+    const sOff = Object.fromEntries(srcLbls.map(l=>[l,0]));
+    const tOff = Object.fromEntries(tgtLbls.map(l=>[l,0]));
 
-    const { nodes: sNodes, links: sLinks } = sankey({
-      nodes: allNodes.map(d=>Object.assign({},d)),
-      links: links.map(d=>Object.assign({},d)),
-    });
+    const svg = d3.select(wrap).append("svg").attr("width",W).attr("height",H);
 
-    // Links
-    svg.append("g").attr("fill","none").selectAll("path")
-      .data(sLinks).enter().append("path")
-      .attr("d", d3.sankeyLinkHorizontal())
-      .attr("stroke", d=>d.color).attr("stroke-width", d=>Math.max(1,d.width))
-      .attr("opacity",0.85);
+    // Links — sorted by source label for consistent rendering
+    Object.entries(flows)
+      .sort((a,b)=>{ const [as]=a[0].split("->"); const [bs]=b[0].split("->"); return labels.indexOf(as)-labels.indexOf(bs); })
+      .forEach(([key,val]) => {
+        const [src,tgt] = key.split("->");
+        const sn=sByL[src], tn=tByL[tgt]; if(!sn||!tn) return;
+        const lh = Math.max(2, (val/sn.count)*sn.h);
+        const sy=sn.y+sOff[src], ty=tn.y+tOff[tgt];
+        const sx=sn.x+NW, tx=tn.x, cx=(sx+tx)/2;
+        const sI=labels.indexOf(src), tI=labels.indexOf(tgt);
+        const dir=tI>sI?"up":tI<sI?"down":"same";
+        const col=dir==="up"?"rgba(140,21,21,0.42)":dir==="down"?"rgba(83,74,183,0.42)":"rgba(120,120,120,0.28)";
+        const path=`M${sx},${sy} C${cx},${sy} ${cx},${ty} ${tx},${ty} L${tx},${ty+lh} C${cx},${ty+lh} ${cx},${sy+lh} ${sx},${sy+lh} Z`;
+        svg.append("path").attr("d",path).attr("fill",col);
+        sOff[src]+=lh; tOff[tgt]+=lh;
+      });
 
     // Nodes
-    svg.append("g").selectAll("rect")
-      .data(sNodes).enter().append("rect")
-      .attr("x",d=>d.x0).attr("y",d=>d.y0)
-      .attr("height",d=>Math.max(1,d.y1-d.y0)).attr("width",d=>d.x1-d.x0)
-      .attr("fill","#8C1515").attr("opacity",0.85).attr("rx",2);
+    [...srcNodes,...tgtNodes].forEach(n=>{
+      svg.append("rect").attr("x",n.x).attr("y",n.y).attr("width",NW).attr("height",n.h)
+        .attr("fill","#8C1515").attr("opacity",0.85).attr("rx",2);
+    });
 
-    // Node labels
-    svg.append("g").selectAll("text")
-      .data(sNodes).enter().append("text")
-      .attr("x", d=>d.x0 < W/2 ? d.x0-8 : d.x1+8)
-      .attr("y", d=>(d.y0+d.y1)/2).attr("dy","0.35em")
-      .attr("text-anchor", d=>d.x0 < W/2 ? "end" : "start")
-      .attr("font-size",12).attr("fill","#53565A").text(d=>d.name);
+    // Labels
+    srcNodes.forEach(n=>{
+      svg.append("text").attr("x",n.x-8).attr("y",n.y+n.h/2).attr("dy","0.35em")
+        .attr("text-anchor","end").attr("font-size",12).attr("fill","#53565A").text(n.label);
+    });
+    tgtNodes.forEach(n=>{
+      svg.append("text").attr("x",n.x+NW+8).attr("y",n.y+n.h/2).attr("dy","0.35em")
+        .attr("text-anchor","start").attr("font-size",12).attr("fill","#53565A").text(n.label);
+    });
 
     // Column headers
-    svg.append("text").attr("x",60).attr("y",12).attr("text-anchor","middle")
-      .attr("font-size",10).attr("fill","#999").text("Before");
-    svg.append("text").attr("x",W-60).attr("y",12).attr("text-anchor","middle")
-      .attr("font-size",10).attr("fill","#999").text("After");
+    svg.append("text").attr("x",PAD+NW/2).attr("y",14).attr("text-anchor","middle").attr("font-size",10).attr("fill","#999").text("Before");
+    svg.append("text").attr("x",W-PAD-NW/2).attr("y",14).attr("text-anchor","middle").attr("font-size",10).attr("fill","#999").text("After");
   }, 60);
 }
 
