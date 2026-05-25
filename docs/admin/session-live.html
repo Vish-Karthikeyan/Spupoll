@@ -124,7 +124,7 @@ function renderStatic() {
 
   const baseUrl = location.origin + location.pathname.replace("admin/session-live.html", "");
   const joinUrl = `${baseUrl}index.html?code=${session.short_code}`;
-  document.getElementById("qr-url").textContent = `spupoll.io/s/${session.short_code}`;
+  document.getElementById("qr-url").textContent = joinUrl;
   new QRCode(document.getElementById("qr-container"), { text: joinUrl, width: 160, height: 160, colorDark: "#8C1515", colorLight: "#fff" });
 
   const tabs = document.getElementById("q-tabs");
