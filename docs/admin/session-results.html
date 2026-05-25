@@ -337,19 +337,23 @@ function renderSlide() {
 
 // ── Chart renderers ───────────────────────────────────────────
 function getLabels(q) {
-  if (["scale5","likert"].includes(q.template)) return ["1","2","3","4","5"];
-  if (q.template === "slider")                  return ["1","2","3","4","5"];
+  if (["scale5","likert","slider"].includes(q.template)) return ["1","2","3","4","5"];
   return q.options || [];
 }
-function getCounts(labels, resps, phase) {
+function binVal(q, v) {
+  if (q.template === "slider") return String(Math.min(5, Math.max(1, Math.ceil(parseFloat(v) / 20))));
+  return v;
+}
+function getCounts(q, resps, phase) {
+  const labels = getLabels(q);
   const r = resps.filter(x => x.phase === phase);
-  return labels.map(l => r.filter(x => (x.template==="slider"? String(Math.min(5,Math.max(1,Math.ceil(parseFloat(x.value)/20)))) : x.value) === l).length);
+  return labels.map(l => r.filter(x => binVal(q, x.value) === l).length);
 }
 
 function renderDistribution(el, slide) {
   const labels = getLabels(slide.question);
-  const pre    = getCounts(labels, slide.responses, "pre");
-  const post   = getCounts(labels, slide.responses, "post");
+  const pre    = getCounts(slide.question, slide.responses, "pre");
+  const post   = getCounts(slide.question, slide.responses, "post");
   const hasPost = post.some(v => v > 0);
 
   el.innerHTML = `<canvas id="ss-chart" height="180"></canvas>`;
@@ -388,70 +392,100 @@ function renderNetShift(el, slide) {
 }
 
 function renderSankey(el, slide) {
-  el.innerHTML = `<div id="sankey-wrap" style="width:100%;height:240px;"></div>`;
-  const resps   = slide.responses;
-  const labels  = getLabels(slide.question);
-  const preMap  = Object.fromEntries(resps.filter(r=>r.phase==="pre").map(r=>[r.device_id, r.value]));
-  const postMap = Object.fromEntries(resps.filter(r=>r.phase==="post").map(r=>[r.device_id, r.value]));
-  const flows   = {};
-  Object.keys(preMap).forEach(d => {
-    if (!postMap[d]) return;
-    const key = `${preMap[d]}->${postMap[d]}`;
-    flows[key] = (flows[key] || 0) + 1;
-  });
+  el.innerHTML = `<div id="sankey-wrap" style="width:100%;height:260px;"></div>`;
+  // Delay so container has painted and clientWidth is available
+  setTimeout(() => {
+    const q      = slide.question;
+    const resps  = slide.responses;
+    const labels = getLabels(q);
 
-  const nodeIndex = {};
-  const nodes = [
-    ...labels.map((l,i) => { nodeIndex[`pre_${l}`]=i; return { name: l }; }),
-    ...labels.map((l,i) => { nodeIndex[`post_${l}`]=labels.length+i; return { name: l }; }),
-  ];
-  const links = Object.entries(flows).map(([key, val]) => {
-    const [src, tgt] = key.split("->");
-    const si = labels.indexOf(src), ti = labels.indexOf(tgt);
-    const dir = ti > si ? "up" : ti < si ? "down" : "same";
-    return {
-      source: si,
-      target: labels.length + ti,
-      value:  val,
-      color:  dir==="up" ? "rgba(140,21,21,0.35)" : dir==="down" ? "rgba(83,74,183,0.35)" : "rgba(100,100,100,0.2)",
-    };
-  });
+    const preMap  = Object.fromEntries(resps.filter(r=>r.phase==="pre").map(r=>[r.device_id, binVal(q, r.value)]));
+    const postMap = Object.fromEntries(resps.filter(r=>r.phase==="post").map(r=>[r.device_id, binVal(q, r.value)]));
 
-  const wrap = document.getElementById("sankey-wrap");
-  const W = wrap.clientWidth || 700, H = 230;
-  const svg = d3.select(wrap).append("svg").attr("width",W).attr("height",H).attr("class","sankey-svg");
+    const flows = {};
+    Object.keys(preMap).forEach(d => {
+      if (!postMap[d]) return;
+      const src = preMap[d], tgt = postMap[d];
+      if (!labels.includes(src) || !labels.includes(tgt)) return;
+      const key = `${src}->${tgt}`;
+      flows[key] = (flows[key] || 0) + 1;
+    });
 
-  const sankey = d3.sankey()
-    .nodeWidth(14).nodePadding(10)
-    .extent([[20, 10],[W-20, H-10]]);
+    const wrap = document.getElementById("sankey-wrap");
+    if (!Object.keys(flows).length) {
+      wrap.innerHTML = `<p style="text-align:center;color:var(--spu-grey);padding:60px 0 0;">No paired pre/post responses available.</p>`;
+      return;
+    }
 
-  const { nodes: sNodes, links: sLinks } = sankey({ nodes: nodes.map(d=>Object.assign({},d)), links: links.map(d=>Object.assign({},d)) });
+    // Only include nodes that appear in actual flows (avoids empty-node stacking)
+    const usedPre = new Set(), usedPost = new Set();
+    Object.keys(flows).forEach(k => { const [s,t]=k.split("->"); usedPre.add(s); usedPost.add(t); });
+    const preNodes  = labels.filter(l => usedPre.has(l));
+    const postNodes = labels.filter(l => usedPost.has(l));
+    const allNodes  = [
+      ...preNodes.map(l => ({ name: l })),
+      ...postNodes.map(l => ({ name: l })),
+    ];
+    const preIdx  = Object.fromEntries(preNodes.map((l,i) => [l, i]));
+    const postIdx = Object.fromEntries(postNodes.map((l,i) => [l, preNodes.length + i]));
 
-  svg.append("g").selectAll("rect")
-    .data(sNodes).enter().append("rect")
-    .attr("x",d=>d.x0).attr("y",d=>d.y0).attr("height",d=>d.y1-d.y0).attr("width",d=>d.x1-d.x0)
-    .attr("fill","#8C1515").attr("opacity",0.8).attr("rx",2);
+    const links = Object.entries(flows).map(([key, val]) => {
+      const [src, tgt] = key.split("->");
+      const sI = labels.indexOf(src), tI = labels.indexOf(tgt);
+      const dir = tI > sI ? "up" : tI < sI ? "down" : "same";
+      return {
+        source: preIdx[src],
+        target: postIdx[tgt],
+        value:  val,
+        color:  dir==="up" ? "rgba(140,21,21,0.5)" : dir==="down" ? "rgba(83,74,183,0.5)" : "rgba(100,100,100,0.3)",
+      };
+    });
 
-  svg.append("g").attr("fill","none").selectAll("path")
-    .data(sLinks).enter().append("path")
-    .attr("d", d3.sankeyLinkHorizontal())
-    .attr("stroke", d => d.color).attr("stroke-width", d => Math.max(1, d.width))
-    .attr("opacity",0.85);
+    const W = wrap.clientWidth || 700, H = 250;
+    const svg = d3.select(wrap).append("svg").attr("width",W).attr("height",H).attr("class","sankey-svg");
 
-  // Labels
-  svg.append("g").selectAll("text")
-    .data(sNodes).enter().append("text")
-    .attr("x", d => d.x0 < W/2 ? d.x0 - 6 : d.x1 + 6)
-    .attr("y", d => (d.y0 + d.y1)/2).attr("dy","0.35em")
-    .attr("text-anchor", d => d.x0 < W/2 ? "end" : "start")
-    .attr("font-size",11).attr("fill","#53565A")
-    .text(d=>d.name);
+    const sankey = d3.sankey().nodeWidth(16).nodePadding(14)
+      .extent([[60, 20],[W-60, H-10]]);
+
+    const { nodes: sNodes, links: sLinks } = sankey({
+      nodes: allNodes.map(d=>Object.assign({},d)),
+      links: links.map(d=>Object.assign({},d)),
+    });
+
+    // Links
+    svg.append("g").attr("fill","none").selectAll("path")
+      .data(sLinks).enter().append("path")
+      .attr("d", d3.sankeyLinkHorizontal())
+      .attr("stroke", d=>d.color).attr("stroke-width", d=>Math.max(1,d.width))
+      .attr("opacity",0.85);
+
+    // Nodes
+    svg.append("g").selectAll("rect")
+      .data(sNodes).enter().append("rect")
+      .attr("x",d=>d.x0).attr("y",d=>d.y0)
+      .attr("height",d=>Math.max(1,d.y1-d.y0)).attr("width",d=>d.x1-d.x0)
+      .attr("fill","#8C1515").attr("opacity",0.85).attr("rx",2);
+
+    // Node labels
+    svg.append("g").selectAll("text")
+      .data(sNodes).enter().append("text")
+      .attr("x", d=>d.x0 < W/2 ? d.x0-8 : d.x1+8)
+      .attr("y", d=>(d.y0+d.y1)/2).attr("dy","0.35em")
+      .attr("text-anchor", d=>d.x0 < W/2 ? "end" : "start")
+      .attr("font-size",12).attr("fill","#53565A").text(d=>d.name);
+
+    // Column headers
+    svg.append("text").attr("x",60).attr("y",12).attr("text-anchor","middle")
+      .attr("font-size",10).attr("fill","#999").text("Before");
+    svg.append("text").attr("x",W-60).attr("y",12).attr("text-anchor","middle")
+      .attr("font-size",10).attr("fill","#999").text("After");
+  }, 60);
 }
 
 function renderPie(el, slide) {
   const labels   = getLabels(slide.question);
-  const preCts   = getCounts(labels, slide.responses, "pre");
-  const postCts  = getCounts(labels, slide.responses, "post");
+  const preCts   = getCounts(slide.question, slide.responses, "pre");
+  const postCts  = getCounts(slide.question, slide.responses, "post");
   const hasPost  = postCts.some(v=>v>0);
   const reds     = ["#8C1515","#B83A4B","#D47A7A","#E8ACAC","#F5D5D5","#4A1B0C"];
 
