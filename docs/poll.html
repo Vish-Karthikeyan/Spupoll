@@ -88,10 +88,16 @@ let selected  = null;
 async function init() {
   if (!code) { location.href = "index.html"; return; }
 
-  const res = await fetch(`${API_BASE}/join/${code}?device_id=${encodeURIComponent(deviceId)}`);
+  const res = await fetch(`${API_BASE}/join/${code}?device_id=${encodeURIComponent(deviceId)}&phase=${phase}`);
   if (!res.ok) { location.href = "index.html"; return; }
   session   = await res.json();
   questions = session.questions || [];
+
+  // If post-poll is already open and user reloaded on pre phase, redirect them
+  if (session.status === "post_open" && phase === "pre") {
+    location.href = `poll.html?code=${code}&phase=post`;
+    return;
+  }
 
   // Block re-submission for this phase
   if (session.device_responded && session.device_responded[phase]) {
