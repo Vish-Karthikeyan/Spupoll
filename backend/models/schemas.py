@@ -41,11 +41,12 @@ class SessionStatusUpdate(BaseModel):
 
 # ── Questions ─────────────────────────────────────────────────
 class QuestionCreate(BaseModel):
-    template:    QuestionTemplate
-    text:        str
-    options:     Optional[List[str]] = None   # MC only
-    anchors:     Optional[dict]      = None   # scale/slider: {lo, hi}
-    order_index: int
+    template:         QuestionTemplate
+    text:             str
+    options:          Optional[List[str]] = None   # MC only
+    anchors:          Optional[dict]      = None   # scale/slider: {lo, hi}
+    order_index:      int
+    applicable_phase: Optional[str]       = "both"  # 'both', 'pre', or 'post'
 
 
 class QuestionReorder(BaseModel):

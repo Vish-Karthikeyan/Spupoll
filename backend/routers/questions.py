@@ -6,7 +6,7 @@ from models.schemas import QuestionCreate, QuestionReorder
 router = APIRouter(tags=["questions"])
 
 
-def _assert_session_owner(db, session_id: str, admin_id: str):
+def _assert_session_owner(db, session_id: str, admin_id: str, allow_statuses=("draft",)):
     sess = db.table("sessions") \
              .select("id, status") \
              .eq("id", session_id) \
@@ -15,25 +15,58 @@ def _assert_session_owner(db, session_id: str, admin_id: str):
              .execute().data
     if not sess:
         raise HTTPException(404, "Session not found")
-    if sess["status"] != "draft":
-        raise HTTPException(400, "Cannot modify questions after session is launched")
+    if sess["status"] not in allow_statuses:
+        raise HTTPException(400, f"Cannot modify questions in status '{sess['status']}'")
     return sess
 
 
 @router.post("/sessions/{session_id}/questions")
 def add_question(session_id: str, body: QuestionCreate, admin=Depends(get_admin)):
     db = get_supabase_admin()
-    _assert_session_owner(db, session_id, admin["id"])
+    _assert_session_owner(db, session_id, admin["id"], allow_statuses=("draft",))
 
     resp = db.table("questions").insert({
-        "session_id":  session_id,
-        "order_index": body.order_index,
-        "template":    body.template,
-        "text":        body.text.strip(),
-        "options":     body.options,
-        "anchors":     body.anchors,
+        "session_id":       session_id,
+        "order_index":      body.order_index,
+        "template":         body.template,
+        "text":             body.text.strip(),
+        "options":          body.options,
+        "anchors":          body.anchors,
+        "applicable_phase": body.applicable_phase or "both",
     }).execute()
     return resp.data[0]
+
+
+@router.post("/sessions/{session_id}/post-questions")
+def set_post_questions(session_id: str, body: list, admin=Depends(get_admin)):
+    """
+    Called when admin chooses different post-poll questions.
+    Marks all existing 'both' questions as 'pre', then inserts the new post questions.
+    Only allowed when session is pre_closed.
+    """
+    db = get_supabase_admin()
+    _assert_session_owner(db, session_id, admin["id"], allow_statuses=("pre_closed",))
+
+    # Mark existing 'both' questions as pre-only
+    db.table("questions") \
+      .update({"applicable_phase": "pre"}) \
+      .eq("session_id", session_id) \
+      .eq("applicable_phase", "both") \
+      .execute()
+
+    # Insert new post-only questions
+    for i, q in enumerate(body):
+        db.table("questions").insert({
+            "session_id":       session_id,
+            "order_index":      i,
+            "template":         q["template"],
+            "text":             q["text"].strip(),
+            "options":          q.get("options"),
+            "anchors":          q.get("anchors"),
+            "applicable_phase": "post",
+        }).execute()
+
+    return {"ok": True}
 
 
 @router.patch("/sessions/{session_id}/questions/reorder")

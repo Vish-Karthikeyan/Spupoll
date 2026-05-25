@@ -17,6 +17,33 @@
     .chart-wrap { position:relative; height:220px; margin-top:16px; }
     .q-tab { display:inline-block; padding:6px 14px; border-radius:var(--radius-sm); font-size:12px; font-weight:500; cursor:pointer; border:1px solid #EBEBEB; background:#fff; margin-right:6px; margin-bottom:6px; }
     .q-tab.active { background:var(--spu-cardinal); color:#fff; border-color:var(--spu-cardinal); }
+
+    /* Post-poll question modal */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:200; display:flex; align-items:center; justify-content:center; padding:24px; }
+    .modal-overlay.hidden { display:none; }
+    .modal-box { background:#fff; border-radius:var(--radius-lg); width:100%; max-width:600px; max-height:90vh; overflow-y:auto; padding:28px; }
+    .modal-box h3 { font-size:17px; margin-bottom:6px; }
+    .modal-choice { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:20px 0; }
+    .choice-card { border:1.5px solid #D8D8D8; border-radius:var(--radius-md); padding:16px; cursor:pointer; transition:border-color .14s,background .14s; }
+    .choice-card:hover { border-color:var(--spu-cardinal); }
+    .choice-card.active { border-color:var(--spu-cardinal); background:var(--spu-off); }
+    .choice-card h4 { font-size:13px; margin-bottom:4px; }
+    .choice-card p  { font-size:11px; color:var(--spu-grey); margin:0; }
+
+    /* Question builder (reused from session-new) */
+    .template-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; }
+    .tmpl-btn { border:1.5px solid #D8D8D8; border-radius:var(--radius-md); padding:10px 12px; cursor:pointer; text-align:left; background:#fff; transition:border-color .14s; font-family:var(--font-ui); }
+    .tmpl-btn:hover { border-color:var(--spu-cardinal); }
+    .tmpl-btn h5 { font-size:13px; margin-bottom:2px; color:var(--spu-black); }
+    .tmpl-btn p  { font-size:11px; color:var(--spu-grey); margin:0; }
+    .q-card { border:1px solid #EBEBEB; border-radius:var(--radius-md); padding:12px 14px; margin-bottom:8px; display:flex; align-items:flex-start; gap:10px; }
+    .q-card .q-body { flex:1; font-size:13px; }
+    .q-card .q-type-badge { font-size:10px; color:var(--spu-grey); background:#F4F4F4; border-radius:4px; padding:2px 6px; display:inline-block; margin-top:4px; }
+    #pq-form { display:none; border:1px solid var(--spu-border); border-radius:var(--radius-md); padding:16px; margin-top:10px; background:var(--spu-off); }
+    .options-list { display:flex; flex-direction:column; gap:6px; }
+    .option-row { display:flex; gap:6px; align-items:center; }
+    .option-row input { flex:1; }
+    .option-row button { color:var(--spu-grey); background:none; border:none; cursor:pointer; font-size:16px; }
   </style>
 </head>
 <body>
@@ -79,9 +106,63 @@
   </main>
 </div>
 
+<!-- Post-poll question modal -->
+<div class="modal-overlay hidden" id="post-modal">
+  <div class="modal-box">
+    <h3>Open post-discussion poll</h3>
+    <p class="text-sm text-muted">Choose the question set participants will answer after the discussion.</p>
+
+    <div class="modal-choice">
+      <div class="choice-card active" id="choice-same" onclick="setChoice('same')">
+        <h4>Same questions</h4>
+        <p>Mirror the pre-discussion poll exactly. Enables full before/after comparison.</p>
+      </div>
+      <div class="choice-card" id="choice-diff" onclick="setChoice('diff')">
+        <h4>Different questions</h4>
+        <p>Build a new set of questions for the post-discussion poll.</p>
+      </div>
+    </div>
+
+    <!-- Question builder (shown when "different" is chosen) -->
+    <div id="pq-builder" style="display:none;">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--spu-grey);margin-bottom:8px;">Post-poll questions</div>
+      <div id="pq-list"></div>
+
+      <div style="font-size:11px;font-weight:600;color:var(--spu-grey);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;margin-top:12px;">Add question</div>
+      <div class="template-grid">
+        <button class="tmpl-btn" onclick="pqOpenForm('scale5')"><h5>Scale 1–5</h5><p>Intensity across 5 labelled steps</p></button>
+        <button class="tmpl-btn" onclick="pqOpenForm('likert')"><h5>Agree – Disagree</h5><p>5-point statement evaluation</p></button>
+        <button class="tmpl-btn" onclick="pqOpenForm('binary')"><h5>Binary</h5><p>Two custom options</p></button>
+        <button class="tmpl-btn" onclick="pqOpenForm('mc')"><h5>Multiple choice</h5><p>3–6 custom options</p></button>
+        <button class="tmpl-btn" onclick="pqOpenForm('slider')"><h5>Spectrum slider</h5><p>Continuous position between two poles</p></button>
+      </div>
+
+      <div id="pq-form">
+        <input type="hidden" id="pq-template">
+        <div class="form-row">
+          <label class="field-label">Question text</label>
+          <input type="text" id="pq-text" placeholder="e.g. How has your view changed?">
+        </div>
+        <div id="pq-extra"></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary" onclick="pqAddQuestion()">Add question</button>
+          <button class="btn btn-ghost" onclick="pqCloseForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:20px;">
+      <button class="btn btn-primary" id="modal-launch-btn" onclick="launchPostPoll()">Open post-discussion poll →</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const sessionId = new URLSearchParams(location.search).get("id");
 let token, session, questions, responses = [], chart, activeQ = 0;
+let postChoice = "same";
+let postQuestions = [];
 
 const STATUS_LABELS = {
   pre_open:   "Pre-discussion live",
@@ -138,8 +219,7 @@ function renderStatic() {
 
   const advBtn = document.getElementById("btn-advance");
   advBtn.textContent = ADVANCE_LABELS[session.status] || "";
-  advBtn.addEventListener("click", advanceStatus);
-
+  advBtn.addEventListener("click", onAdvanceClick);
   if (session.status === "complete") advBtn.style.display = "none";
 
   document.getElementById("btn-csv").href = `${API_BASE}/sessions/${sessionId}/results/csv?token=${token}`;
@@ -157,10 +237,7 @@ function updateStatusBadges() {
 }
 
 async function loadResponses() {
-  const { data } = await supabase
-    .from("responses")
-    .select("*")
-    .eq("session_id", sessionId);
+  const { data } = await supabase.from("responses").select("*").eq("session_id", sessionId);
   responses = data || [];
   renderChart();
   updateStats();
@@ -180,7 +257,6 @@ function updateStats() {
   const uniqueDevices = new Set(phaseResps.map(r => r.device_id)).size;
   document.getElementById("stat-responses").textContent = uniqueDevices;
 
-  // Average for first ordinal question
   const q = questions[0];
   if (q && ["scale5","likert","slider"].includes(q.template)) {
     const qResps = phaseResps.filter(r => r.question_id === q.id);
@@ -192,7 +268,7 @@ function updateStats() {
 }
 
 function renderChart() {
-  const q     = questions[activeQ];
+  const q = questions[activeQ];
   if (!q) return;
   const phase = session.status === "post_open" ? "post" : "pre";
   const qResps = responses.filter(r => r.question_id === q.id && r.phase === phase);
@@ -216,19 +292,56 @@ function renderChart() {
   if (chart) chart.destroy();
   chart = new Chart(ctx, {
     type: "bar",
-    data: {
-      labels,
-      datasets: [{ data: counts, backgroundColor: "rgba(140,21,21,0.75)", borderRadius: 4 }],
-    },
+    data: { labels, datasets: [{ data: counts, backgroundColor: "rgba(140,21,21,0.75)", borderRadius: 4 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { display: false } },
-        y: { beginAtZero: true, ticks: { stepSize: 1 } },
-      },
+      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { stepSize: 1 } } },
     },
   });
+}
+
+// ── Advance button handler ─────────────────────────────────────
+
+function onAdvanceClick() {
+  // If closing pre-poll to open post-poll, show the question choice modal
+  if (session.status === "pre_closed" && session.format === "pre_post") {
+    postChoice   = "same";
+    postQuestions = [];
+    document.getElementById("pq-list").innerHTML = "";
+    document.getElementById("pq-builder").style.display = "none";
+    document.getElementById("pq-form").style.display = "none";
+    document.getElementById("choice-same").classList.add("active");
+    document.getElementById("choice-diff").classList.remove("active");
+    document.getElementById("post-modal").classList.remove("hidden");
+  } else {
+    advanceStatus();
+  }
+}
+
+function closeModal() {
+  document.getElementById("post-modal").classList.add("hidden");
+}
+
+function setChoice(c) {
+  postChoice = c;
+  document.getElementById("choice-same").classList.toggle("active", c === "same");
+  document.getElementById("choice-diff").classList.toggle("active", c === "diff");
+  document.getElementById("pq-builder").style.display = c === "diff" ? "block" : "none";
+}
+
+async function launchPostPoll() {
+  if (postChoice === "diff") {
+    if (!postQuestions.length) { alert("Add at least one question for the post-discussion poll."); return; }
+    // Save new post questions to backend
+    await fetch(`${API_BASE}/sessions/${sessionId}/post-questions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(postQuestions),
+    });
+  }
+  closeModal();
+  advanceStatus();
 }
 
 async function advanceStatus() {
@@ -252,6 +365,76 @@ async function advanceStatus() {
     renderChart();
     updateStats();
   }
+}
+
+// ── Post-poll question builder ─────────────────────────────────
+
+const templateLabels = { scale5:"Scale 1–5", likert:"Agree–Disagree", binary:"Binary", mc:"Multiple choice", slider:"Spectrum" };
+
+function pqRenderList() {
+  const list = document.getElementById("pq-list");
+  if (!postQuestions.length) { list.innerHTML = ""; return; }
+  list.innerHTML = postQuestions.map((q, i) => `
+    <div class="q-card">
+      <div class="q-body">
+        <div>${q.text}</div>
+        <span class="q-type-badge">${templateLabels[q.template]}</span>
+      </div>
+      <button onclick="postQuestions.splice(${i},1);pqRenderList();" style="background:none;border:none;cursor:pointer;color:var(--spu-grey);font-size:16px;"><i class="ti ti-trash"></i></button>
+    </div>`).join("");
+}
+
+function pqOpenForm(tmpl) {
+  document.getElementById("pq-template").value = tmpl;
+  document.getElementById("pq-text").value = "";
+  const extra = document.getElementById("pq-extra");
+
+  if (tmpl === "scale5") {
+    extra.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="form-row"><div><label class="field-label">Low label (1)</label><input type="text" id="pq-lo" placeholder="Not at all"></div><div><label class="field-label">High label (5)</label><input type="text" id="pq-hi" placeholder="Completely"></div></div>`;
+  } else if (tmpl === "likert") {
+    extra.innerHTML = `<div class="form-row"><div class="text-sm text-muted">Labels: Strongly disagree · Disagree · Neutral · Agree · Strongly agree</div></div>`;
+  } else if (tmpl === "binary") {
+    extra.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="form-row"><div><label class="field-label">Option A</label><input type="text" id="pq-a" placeholder="Yes"></div><div><label class="field-label">Option B</label><input type="text" id="pq-b" placeholder="No"></div></div>`;
+  } else if (tmpl === "mc") {
+    extra.innerHTML = `<div class="form-row"><label class="field-label">Options</label><div class="options-list" id="pq-opts"><div class="option-row"><input type="text" placeholder="Option 1"><button onclick="this.parentElement.remove()"><i class="ti ti-x"></i></button></div><div class="option-row"><input type="text" placeholder="Option 2"><button onclick="this.parentElement.remove()"><i class="ti ti-x"></i></button></div><div class="option-row"><input type="text" placeholder="Option 3"><button onclick="this.parentElement.remove()"><i class="ti ti-x"></i></button></div></div><button class="btn btn-ghost mt-1" style="font-size:12px;padding:6px 12px;" onclick="pqAddOpt()"><i class="ti ti-plus"></i> Add option</button></div>`;
+  } else if (tmpl === "slider") {
+    extra.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="form-row"><div><label class="field-label">Left pole</label><input type="text" id="pq-lo" placeholder="Laissez-faire"></div><div><label class="field-label">Right pole</label><input type="text" id="pq-hi" placeholder="Strict control"></div></div>`;
+  } else { extra.innerHTML = ""; }
+
+  document.getElementById("pq-form").style.display = "block";
+  document.getElementById("pq-text").focus();
+}
+
+function pqCloseForm() { document.getElementById("pq-form").style.display = "none"; }
+
+function pqAddOpt() {
+  const list = document.getElementById("pq-opts");
+  const row = document.createElement("div");
+  row.className = "option-row";
+  row.innerHTML = `<input type="text" placeholder="Option"><button onclick="this.parentElement.remove()"><i class="ti ti-x"></i></button>`;
+  list.appendChild(row);
+}
+
+function pqAddQuestion() {
+  const tmpl = document.getElementById("pq-template").value;
+  const text = document.getElementById("pq-text").value.trim();
+  if (!text) { alert("Enter a question."); return; }
+
+  const q = { template: tmpl, text, order_index: postQuestions.length };
+  if (tmpl === "scale5" || tmpl === "slider") {
+    q.anchors = { lo: document.getElementById("pq-lo")?.value.trim() || "", hi: document.getElementById("pq-hi")?.value.trim() || "" };
+  }
+  if (tmpl === "binary") {
+    q.options = [document.getElementById("pq-a")?.value.trim() || "Yes", document.getElementById("pq-b")?.value.trim() || "No"];
+  }
+  if (tmpl === "mc") {
+    q.options = Array.from(document.querySelectorAll("#pq-opts input")).map(i => i.value.trim()).filter(Boolean);
+    if (q.options.length < 2) { alert("Add at least 2 options."); return; }
+  }
+
+  postQuestions.push(q);
+  pqRenderList();
+  pqCloseForm();
 }
 
 document.getElementById("nav-signout").addEventListener("click", async () => {

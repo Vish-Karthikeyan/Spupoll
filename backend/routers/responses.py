@@ -19,8 +19,8 @@ class ResponseSubmit(BaseModel):
 
 
 @router.get("/{code}")
-def get_session_by_code(code: str, device_id: Optional[str] = None):
-    """Return session + questions for the given short_code. No auth."""
+def get_session_by_code(code: str, device_id: Optional[str] = None, phase: str = "pre"):
+    """Return session + questions filtered for the requested phase. No auth."""
     db   = get_supabase_admin()
     resp = db.table("sessions") \
              .select("*, questions(*)") \
@@ -33,23 +33,31 @@ def get_session_by_code(code: str, device_id: Optional[str] = None):
         raise HTTPException(404, "Session not found or not yet open")
 
     sess = resp.data
-    # Sort questions by order_index
-    sess["questions"] = sorted(sess.get("questions", []), key=lambda q: q["order_index"])
+    all_questions = sorted(sess.get("questions", []), key=lambda q: q["order_index"])
+
+    # Filter to questions applicable to this phase
+    def applies(q):
+        ap = q.get("applicable_phase", "both")
+        return ap == "both" or ap == phase
+
+    sess["questions"] = [q for q in all_questions if applies(q)]
 
     # Check which phases this device has already completed
     sess["device_responded"] = {"pre": False, "post": False}
     if device_id:
         existing = db.table("responses") \
-                     .select("phase") \
+                     .select("phase, question_id") \
                      .eq("session_id", sess["id"]) \
                      .eq("device_id", device_id) \
                      .execute()
-        phases_done = {r["phase"] for r in (existing.data or [])}
-        # A phase is "complete" if the device has answered all questions
-        q_count = len(sess["questions"])
-        for phase in ("pre", "post"):
-            phase_count = sum(1 for r in (existing.data or []) if r["phase"] == phase)
-            sess["device_responded"][phase] = (q_count > 0 and phase_count >= q_count)
+        rows = existing.data or []
+
+        # For each phase, count how many of that phase's questions are answered
+        for ph in ("pre", "post"):
+            ph_questions = [q for q in all_questions if q.get("applicable_phase", "both") in ("both", ph)]
+            ph_answered  = {r["question_id"] for r in rows if r["phase"] == ph}
+            ph_ids       = {q["id"] for q in ph_questions}
+            sess["device_responded"][ph] = bool(ph_ids) and ph_ids.issubset(ph_answered)
 
     return sess
 
