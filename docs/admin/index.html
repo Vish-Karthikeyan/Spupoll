@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — Admin Login</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="../js/config.js"></script>
+  <style>
+    body { background: var(--spu-cardinal); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+    .login-card { background:#fff; border-radius:var(--radius-lg); width:100%; max-width:380px; overflow:hidden; box-shadow:0 8px 40px rgba(0,0,0,0.2); }
+    .login-header { background:var(--spu-dark); padding:28px 24px; text-align:center; color:#fff; }
+    .login-body { padding:28px 24px; }
+    .tabs { display:flex; border-bottom:1px solid #EBEBEB; margin-bottom:22px; }
+    .tab-btn { flex:1; padding:10px; text-align:center; font-size:13px; font-weight:500; cursor:pointer; border-bottom:2px solid transparent; color:var(--spu-grey); background:none; border-top:none; border-left:none; border-right:none; }
+    .tab-btn.active { color:var(--spu-cardinal); border-bottom-color:var(--spu-cardinal); }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+    #pending-notice { display:none; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-header">
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:6px;">
+        <img src="../../elements/36.png" alt="SPU" style="width:38px;height:38px;border-radius:50%;object-fit:cover;">
+        <span class="wordmark" style="color:#fff;font-size:22px;">Spupoll<sup>™</sup></span>
+      </div>
+      <div style="font-size:11px;opacity:.7;">Stanford Political Union · Admin</div>
+    </div>
+    <div class="login-body">
+      <div class="alert alert-error hidden" id="error-msg"></div>
+      <div class="alert alert-success hidden" id="success-msg"></div>
+
+      <div class="alert alert-info" id="pending-notice">
+        Your account is pending super-admin approval. You'll receive access once approved.
+      </div>
+
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('login')">Sign in</button>
+        <button class="tab-btn" onclick="switchTab('register')">Request access</button>
+      </div>
+
+      <!-- Login -->
+      <div class="tab-panel active" id="panel-login">
+        <div class="form-row">
+          <label class="field-label">Email</label>
+          <input type="email" id="login-email" placeholder="you@stanford.edu">
+        </div>
+        <div class="form-row">
+          <label class="field-label">Password</label>
+          <input type="password" id="login-password" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary btn-full" id="login-btn">Sign in</button>
+      </div>
+
+      <!-- Register -->
+      <div class="tab-panel" id="panel-register">
+        <p class="text-sm text-muted mb-2">Create an account. A super-admin will approve it before you can log in.</p>
+        <div class="form-row">
+          <label class="field-label">Full name</label>
+          <input type="text" id="reg-name" placeholder="Your name">
+        </div>
+        <div class="form-row">
+          <label class="field-label">Email</label>
+          <input type="email" id="reg-email" placeholder="you@stanford.edu">
+        </div>
+        <div class="form-row">
+          <label class="field-label">Password</label>
+          <input type="password" id="reg-password" placeholder="Min. 8 characters">
+        </div>
+        <button class="btn btn-primary btn-full" id="reg-btn">Request access</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(t) {
+      document.querySelectorAll(".tab-btn").forEach((b,i) => b.classList.toggle("active", (i===0&&t==="login")||(i===1&&t==="register")));
+      document.getElementById("panel-login").classList.toggle("active", t==="login");
+      document.getElementById("panel-register").classList.toggle("active", t==="register");
+    }
+    function showErr(msg)  { const el=document.getElementById("error-msg");   el.textContent=msg; el.classList.remove("hidden"); }
+    function showOk(msg)   { const el=document.getElementById("success-msg"); el.textContent=msg; el.classList.remove("hidden"); }
+    function clearAlerts() {
+      ["error-msg","success-msg"].forEach(id => document.getElementById(id).classList.add("hidden"));
+    }
+
+    // Sign in
+    document.getElementById("login-btn").addEventListener("click", async () => {
+      clearAlerts();
+      const email    = document.getElementById("login-email").value.trim();
+      const password = document.getElementById("login-password").value;
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) { showErr(error.message); return; }
+
+      // Check approval status
+      const token = data.session.access_token;
+      const res   = await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+      const admin = await res.json();
+
+      if (!admin.approved) {
+        await supabase.auth.signOut();
+        document.getElementById("pending-notice").style.display = "block";
+        return;
+      }
+      location.href = "dashboard.html";
+    });
+
+    // Register
+    document.getElementById("reg-btn").addEventListener("click", async () => {
+      clearAlerts();
+      const name     = document.getElementById("reg-name").value.trim();
+      const email    = document.getElementById("reg-email").value.trim();
+      const password = document.getElementById("reg-password").value;
+      if (!name || !email || !password) { showErr("All fields are required."); return; }
+      if (password.length < 8)          { showErr("Password must be at least 8 characters."); return; }
+
+      const { error } = await supabase.auth.signUp({
+        email, password,
+        options: { data: { name } },
+      });
+      if (error) { showErr(error.message); return; }
+      showOk("Request submitted. A super-admin will review your account.");
+      switchTab("login");
+    });
+
+    // Redirect if already logged in
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) location.href = "dashboard.html";
+    });
+  </script>
+</body>
+</html>

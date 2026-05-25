@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — Live</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="../js/config.js"></script>
+  <style>
+    .live-grid { display:grid; grid-template-columns:1fr 260px; gap:24px; align-items:start; }
+    .qr-panel { text-align:center; }
+    .phase-control { display:flex; gap:10px; margin-top:20px; flex-wrap:wrap; }
+    .chart-wrap { position:relative; height:220px; margin-top:16px; }
+    .q-tab { display:inline-block; padding:6px 14px; border-radius:var(--radius-sm); font-size:12px; font-weight:500; cursor:pointer; border:1px solid #EBEBEB; background:#fff; margin-right:6px; margin-bottom:6px; }
+    .q-tab.active { background:var(--spu-cardinal); color:#fff; border-color:var(--spu-cardinal); }
+  </style>
+</head>
+<body>
+<div class="admin-shell">
+  <nav class="admin-sidebar">
+    <div class="sidebar-logo">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <img src="../../elements/36.png" alt="SPU" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
+        <span class="wordmark" style="color:#fff;font-size:17px;">Spupoll<sup>™</sup></span>
+      </div>
+    </div>
+    <a href="session-new.html" class="nav-item"><i class="ti ti-plus"></i>New session</a>
+    <a href="dashboard.html"   class="nav-item"><i class="ti ti-list"></i>Sessions</a>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" id="nav-signout"><i class="ti ti-logout"></i>Sign out</div>
+  </nav>
+
+  <main class="admin-main">
+    <div id="loading" class="text-muted text-sm">Loading session…</div>
+    <div id="live-content" class="hidden">
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <h2 id="sess-title"></h2>
+          <span class="badge badge-live" id="phase-badge"></span>
+          <span class="badge" id="status-badge"></span>
+        </div>
+        <p id="sess-meta"></p>
+      </div>
+
+      <div class="live-grid">
+        <!-- Left: stats + chart -->
+        <div>
+          <div class="grid-3 mb-3">
+            <div class="stat-tile"><span class="num" id="stat-responses">0</span><div class="lbl">Responses</div></div>
+            <div class="stat-tile"><span class="num" id="stat-avg">—</span><div class="lbl">Avg (Q1)</div></div>
+            <div class="stat-tile"><span class="num" id="stat-qs">0</span><div class="lbl">Questions</div></div>
+          </div>
+
+          <!-- Question tabs -->
+          <div id="q-tabs"></div>
+
+          <div class="chart-wrap">
+            <canvas id="dist-chart"></canvas>
+          </div>
+
+          <div class="phase-control">
+            <button class="btn btn-primary" id="btn-advance" style="background:var(--spu-dark);border-color:var(--spu-dark);"></button>
+            <a id="btn-csv" class="btn btn-ghost" style="display:none;"><i class="ti ti-table"></i>Export CSV</a>
+          </div>
+        </div>
+
+        <!-- Right: QR -->
+        <div class="qr-panel">
+          <div class="text-sm text-muted mb-1">Scan to participate</div>
+          <div class="qr-box" id="qr-container"></div>
+          <div class="qr-url" id="qr-url"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const sessionId = new URLSearchParams(location.search).get("id");
+let token, session, questions, responses = [], chart, activeQ = 0;
+
+const STATUS_LABELS = {
+  pre_open:   "Pre-discussion live",
+  pre_closed: "Pre-discussion closed",
+  post_open:  "Post-discussion live",
+  complete:   "Complete",
+};
+const ADVANCE_LABELS = {
+  pre_open:   "Close pre-discussion poll",
+  pre_closed: "Open post-discussion poll",
+  post_open:  "Close session & view results",
+};
+const NEXT_STATUS = {
+  pre_open:   "pre_closed",
+  pre_closed: "post_open",
+  post_open:  "complete",
+};
+
+async function init() {
+  const { data: { session: s } } = await supabase.auth.getSession();
+  if (!s) { location.href = "index.html"; return; }
+  token = s.access_token;
+
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+  session   = await res.json();
+  questions = session.questions || [];
+
+  renderStatic();
+  await loadResponses();
+  subscribeToResponses();
+  document.getElementById("loading").classList.add("hidden");
+  document.getElementById("live-content").classList.remove("hidden");
+}
+
+function renderStatic() {
+  document.getElementById("sess-title").textContent = session.title;
+  document.getElementById("sess-meta").textContent  = new Date(session.created_at).toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric" });
+  document.getElementById("stat-qs").textContent    = questions.length;
+  updateStatusBadges();
+
+  const baseUrl = location.origin + location.pathname.replace("admin/session-live.html", "");
+  const joinUrl = `${baseUrl}index.html?code=${session.short_code}`;
+  document.getElementById("qr-url").textContent = `spupoll.io/s/${session.short_code}`;
+  new QRCode(document.getElementById("qr-container"), { text: joinUrl, width: 160, height: 160, colorDark: "#8C1515", colorLight: "#fff" });
+
+  const tabs = document.getElementById("q-tabs");
+  questions.forEach((q, i) => {
+    const btn = document.createElement("button");
+    btn.className = `q-tab${i === 0 ? " active" : ""}`;
+    btn.textContent = `Q${i + 1}`;
+    btn.addEventListener("click", () => { activeQ = i; document.querySelectorAll(".q-tab").forEach((t,j) => t.classList.toggle("active", j===i)); renderChart(); });
+    tabs.appendChild(btn);
+  });
+
+  const advBtn = document.getElementById("btn-advance");
+  advBtn.textContent = ADVANCE_LABELS[session.status] || "";
+  advBtn.addEventListener("click", advanceStatus);
+
+  if (session.status === "complete") advBtn.style.display = "none";
+
+  document.getElementById("btn-csv").href = `${API_BASE}/sessions/${sessionId}/results/csv?token=${token}`;
+  document.getElementById("btn-csv").style.display = "flex";
+}
+
+function updateStatusBadges() {
+  const phaseBadge  = document.getElementById("phase-badge");
+  const statusBadge = document.getElementById("status-badge");
+  const phase = session.status.includes("post") ? "Post-discussion" : "Pre-discussion";
+  phaseBadge.textContent = phase;
+  phaseBadge.className = `badge ${session.status.includes("post") ? "badge-post" : "badge-pre"}`;
+  statusBadge.textContent = session.status === "complete" ? "Complete" : session.status.includes("open") ? "Live" : "Closed";
+  statusBadge.className = `badge ${session.status.includes("open") ? "badge-live" : session.status === "complete" ? "badge-done" : "badge-draft"}`;
+}
+
+async function loadResponses() {
+  const { data } = await supabase
+    .from("responses")
+    .select("*")
+    .eq("session_id", sessionId);
+  responses = data || [];
+  renderChart();
+  updateStats();
+}
+
+function subscribeToResponses() {
+  supabase
+    .channel("responses-live")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "responses", filter: `session_id=eq.${sessionId}` },
+      (payload) => { responses.push(payload.new); renderChart(); updateStats(); })
+    .subscribe();
+}
+
+function updateStats() {
+  const phase = session.status === "post_open" ? "post" : "pre";
+  const phaseResps = responses.filter(r => r.phase === phase);
+  const uniqueDevices = new Set(phaseResps.map(r => r.device_id)).size;
+  document.getElementById("stat-responses").textContent = uniqueDevices;
+
+  // Average for first ordinal question
+  const q = questions[0];
+  if (q && ["scale5","likert","slider"].includes(q.template)) {
+    const qResps = phaseResps.filter(r => r.question_id === q.id);
+    if (qResps.length) {
+      const avg = qResps.reduce((s, r) => s + parseFloat(r.value), 0) / qResps.length;
+      document.getElementById("stat-avg").textContent = avg.toFixed(1);
+    }
+  }
+}
+
+function renderChart() {
+  const q     = questions[activeQ];
+  if (!q) return;
+  const phase = session.status === "post_open" ? "post" : "pre";
+  const qResps = responses.filter(r => r.question_id === q.id && r.phase === phase);
+
+  let labels, counts;
+  if (["scale5","likert"].includes(q.template)) {
+    labels = ["1","2","3","4","5"];
+    counts = labels.map(l => qResps.filter(r => r.value === l).length);
+  } else if (q.template === "binary") {
+    labels = q.options || ["Yes","No"];
+    counts = labels.map(l => qResps.filter(r => r.value === l).length);
+  } else if (q.template === "mc") {
+    labels = q.options || [];
+    counts = labels.map(l => qResps.filter(r => r.value === l).length);
+  } else {
+    labels = ["1","2","3","4","5"];
+    counts = labels.map((_, i) => qResps.filter(r => { const v = parseFloat(r.value)/20; return Math.min(5,Math.max(1,Math.ceil(v))) === i+1; }).length);
+  }
+
+  const ctx = document.getElementById("dist-chart").getContext("2d");
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{ data: counts, backgroundColor: "rgba(140,21,21,0.75)", borderRadius: 4 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false } },
+        y: { beginAtZero: true, ticks: { stepSize: 1 } },
+      },
+    },
+  });
+}
+
+async function advanceStatus() {
+  const next = NEXT_STATUS[session.status];
+  if (!next) return;
+
+  await fetch(`${API_BASE}/sessions/${sessionId}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body:    JSON.stringify({ status: next }),
+  });
+
+  if (next === "complete") {
+    location.href = `session-results.html?id=${sessionId}`;
+  } else {
+    session.status = next;
+    updateStatusBadges();
+    const advBtn = document.getElementById("btn-advance");
+    advBtn.textContent = ADVANCE_LABELS[next] || "";
+    if (!ADVANCE_LABELS[next]) advBtn.style.display = "none";
+    renderChart();
+    updateStats();
+  }
+}
+
+document.getElementById("nav-signout").addEventListener("click", async () => {
+  await supabase.auth.signOut(); location.href = "index.html";
+});
+
+init();
+</script>
+</body>
+</html>

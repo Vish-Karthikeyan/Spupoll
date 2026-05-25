@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — Poll</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/fingerprint.js"></script>
+</head>
+<body>
+
+<!-- ── Screens (shown one at a time) ─────────────────────────-->
+<div id="screen-loading" class="p-shell flex-center" style="min-height:100vh;">
+  <div class="text-center text-muted"><i class="ti ti-loader" style="font-size:32px;animation:spin 1s linear infinite;display:block;margin-bottom:12px;"></i>Loading…</div>
+</div>
+
+<div id="screen-question" class="p-shell hidden">
+  <div class="p-header" id="q-header">
+    <div style="font-size:10px;opacity:.75;margin-bottom:3px;" id="q-phase-label"></div>
+    <div style="font-family:var(--font-display);font-size:14px;font-weight:700;margin-bottom:10px;" id="q-session-title"></div>
+    <div class="progress-dots" id="q-progress"></div>
+  </div>
+  <div class="p-body">
+    <div style="font-size:10px;color:var(--spu-grey);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;" id="q-counter"></div>
+    <div class="question-text" id="q-text"></div>
+    <div id="q-input"></div>
+  </div>
+  <div class="p-footer">
+    <button class="btn btn-primary btn-full" id="q-submit" disabled>Submit →</button>
+  </div>
+</div>
+
+<div id="screen-waiting" class="p-shell hidden">
+  <div class="p-header" style="padding:48px 20px;text-align:center;">
+    <div style="font-size:42px;margin-bottom:14px;">✓</div>
+    <div style="font-family:var(--font-display);font-size:20px;font-weight:700;">Response recorded.</div>
+  </div>
+  <div class="p-body text-center" style="padding-top:36px;">
+    <div style="font-family:var(--font-display);font-size:16px;color:var(--spu-black);margin-bottom:10px;">Enjoy the discussion.</div>
+    <p class="text-sm text-muted">You'll be prompted here when the post-discussion poll opens.</p>
+    <div style="margin-top:32px;padding:16px;background:var(--spu-off);border-radius:var(--radius-md);border:1px solid var(--spu-border);">
+      <div class="text-sm text-muted mb-1">Session</div>
+      <div style="font-family:var(--font-display);font-size:14px;color:var(--spu-cardinal);font-weight:700;" id="w-session-title"></div>
+    </div>
+  </div>
+</div>
+
+<div id="screen-done" class="p-shell hidden">
+  <div class="p-header" style="padding:64px 20px;text-align:center;">
+    <div style="font-family:var(--font-display);font-size:24px;font-weight:700;margin-bottom:8px;">Thank you.</div>
+    <div style="font-size:13px;opacity:.8;">Your responses have been recorded.</div>
+  </div>
+  <div class="p-body text-center" style="padding-top:28px;">
+    <p class="text-sm text-muted">Results will be shared with the room shortly.</p>
+    <div style="margin-top:40px;font-family:var(--font-display);font-size:11px;color:var(--spu-cardinal);opacity:.6;">Stanford Political Union · Est. 1938</div>
+  </div>
+</div>
+
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<script>
+const params   = new URLSearchParams(location.search);
+const code     = params.get("code");
+const phase    = params.get("phase") || "pre";
+const deviceId = getDeviceId();
+
+let session   = null;
+let questions = [];
+let current   = 0;
+let selected  = null;
+
+async function init() {
+  if (!code) { location.href = "index.html"; return; }
+
+  const res = await fetch(`${API_BASE}/join/${code}`);
+  if (!res.ok) { location.href = "index.html"; return; }
+  session   = await res.json();
+  questions = session.questions || [];
+
+  // Subscribe to session status changes (real-time)
+  supabase
+    .channel("session-status")
+    .on("postgres_changes", {
+      event: "UPDATE",
+      schema: "public",
+      table: "sessions",
+      filter: `id=eq.${session.id}`,
+    }, (payload) => {
+      const newStatus = payload.new.status;
+      if (newStatus === "post_open" && phase === "pre") {
+        location.href = `poll.html?code=${code}&phase=post`;
+      }
+    })
+    .subscribe();
+
+  hide("screen-loading");
+  renderQuestion();
+}
+
+function renderQuestion() {
+  if (current >= questions.length) {
+    if (phase === "pre") {
+      show("screen-waiting");
+      document.getElementById("w-session-title").textContent = session.title;
+    } else {
+      show("screen-done");
+    }
+    return;
+  }
+
+  const q = questions[current];
+  selected = null;
+
+  // Header
+  const header = document.getElementById("q-header");
+  if (phase === "post") header.classList.add("p-header-dark");
+  document.getElementById("q-phase-label").textContent   = phase === "pre" ? "Before the discussion" : "After the discussion";
+  document.getElementById("q-session-title").textContent = session.title;
+  document.getElementById("q-counter").textContent       = `Question ${current + 1} of ${questions.length}`;
+
+  // Progress dots
+  const prog = document.getElementById("q-progress");
+  prog.innerHTML = questions.map((_, i) => `<div class="pdot${i < current ? " done" : ""}"></div>`).join("") +
+    `<span style="font-size:10px;opacity:.65;margin-left:6px;">${current + 1} of ${questions.length}</span>`;
+
+  document.getElementById("q-text").textContent = q.text;
+  document.getElementById("q-submit").disabled  = true;
+
+  // Render input
+  const inputEl = document.getElementById("q-input");
+  inputEl.innerHTML = "";
+
+  if (q.template === "scale5" || q.template === "likert") {
+    const labels = q.template === "scale5"
+      ? ["Not at all", "Slightly", "Moderately", "Substantially", "Completely"]
+      : ["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"];
+    const anchors = q.anchors || {};
+
+    if (anchors.lo || anchors.hi) {
+      inputEl.innerHTML += `<div class="scale-axis"><span>${anchors.lo || "1"}</span><span>${anchors.hi || "5"}</span></div>`;
+    }
+    labels.forEach((lbl, i) => {
+      const btn = document.createElement("button");
+      btn.className = "option-btn";
+      btn.innerHTML = `<div class="option-num">${i + 1}</div><span>${lbl}</span>`;
+      btn.dataset.value = String(i + 1);
+      btn.addEventListener("click", () => selectOption(btn, String(i + 1)));
+      inputEl.appendChild(btn);
+    });
+
+  } else if (q.template === "binary") {
+    const opts = q.options || ["Yes", "No"];
+    const row  = document.createElement("div");
+    row.className = "binary-row";
+    opts.forEach((opt) => {
+      const btn = document.createElement("button");
+      btn.className = "binary-btn";
+      btn.textContent = opt;
+      btn.dataset.value = opt;
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".binary-btn").forEach(b => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        selected = opt;
+        document.getElementById("q-submit").disabled = false;
+      });
+      row.appendChild(btn);
+    });
+    inputEl.appendChild(row);
+
+  } else if (q.template === "mc") {
+    const opts = q.options || [];
+    opts.forEach((opt) => {
+      const btn = document.createElement("button");
+      btn.className = "option-btn";
+      btn.innerHTML = `<div class="option-num" style="border-radius:3px;width:14px;height:14px;background:transparent;border:1.5px solid var(--spu-cardinal);"></div><span>${opt}</span>`;
+      btn.dataset.value = opt;
+      btn.addEventListener("click", () => selectOption(btn, opt));
+      inputEl.appendChild(btn);
+    });
+
+  } else if (q.template === "slider") {
+    const anchors = q.anchors || { lo: "Strongly disagree", hi: "Strongly agree" };
+    const wrap = document.createElement("div");
+    wrap.className = "slider-wrap";
+    wrap.innerHTML = `
+      <div class="slider-labels"><span>${anchors.lo}</span><span>${anchors.hi}</span></div>
+      <input type="range" min="0" max="100" value="50" id="slider-input">
+      <div style="text-align:center;font-size:13px;color:var(--spu-cardinal);margin-top:6px;font-weight:500;" id="slider-val">50</div>
+    `;
+    inputEl.appendChild(wrap);
+    const slider = document.getElementById("slider-input");
+    slider.addEventListener("input", () => {
+      document.getElementById("slider-val").textContent = slider.value;
+      selected = slider.value;
+      document.getElementById("q-submit").disabled = false;
+      slider.style.background = `linear-gradient(to right, var(--spu-cardinal) 0%, var(--spu-cardinal) ${slider.value}%, #D8D8D8 ${slider.value}%)`;
+    });
+    // Pre-select middle value
+    selected = "50";
+    document.getElementById("q-submit").disabled = false;
+  }
+
+  show("screen-question");
+}
+
+function selectOption(btn, val) {
+  document.querySelectorAll(".option-btn").forEach(b => b.classList.remove("selected"));
+  btn.classList.add("selected");
+  selected = val;
+  document.getElementById("q-submit").disabled = false;
+}
+
+document.getElementById("q-submit").addEventListener("click", async () => {
+  if (!selected) return;
+  const q   = questions[current];
+  const btn = document.getElementById("q-submit");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+
+  await fetch(`${API_BASE}/join/${code}/respond`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ question_id: q.id, device_id: deviceId, phase, value: selected }),
+  });
+
+  current++;
+  renderQuestion();
+});
+
+function show(id)  { document.getElementById(id).classList.remove("hidden"); }
+function hide(id)  { document.getElementById(id).classList.add("hidden"); }
+
+init();
+</script>
+</body>
+</html>

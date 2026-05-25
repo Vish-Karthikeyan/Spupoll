@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — Admin Accounts</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+<div class="admin-shell">
+  <nav class="admin-sidebar">
+    <div class="sidebar-logo">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <img src="../../elements/36.png" alt="SPU" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
+        <span class="wordmark" style="color:#fff;font-size:17px;">Spupoll<sup>™</sup></span>
+      </div>
+    </div>
+    <a href="session-new.html" class="nav-item"><i class="ti ti-plus"></i>New session</a>
+    <a href="dashboard.html"   class="nav-item"><i class="ti ti-list"></i>Sessions</a>
+    <a href="accounts.html"    class="nav-item active"><i class="ti ti-users"></i>Admins</a>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" id="nav-signout"><i class="ti ti-logout"></i>Sign out</div>
+  </nav>
+
+  <main class="admin-main">
+    <div class="page-header">
+      <h2>Admin accounts</h2>
+      <p>Approve or revoke access. Only you can see this page.</p>
+    </div>
+    <div class="alert alert-success hidden" id="success-msg"></div>
+
+    <!-- Pending -->
+    <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--spu-grey);margin-bottom:8px;">Pending approval</div>
+    <div id="pending-list" class="mb-3"><div class="text-muted text-sm">Loading…</div></div>
+
+    <div class="divider"></div>
+
+    <!-- All admins -->
+    <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--spu-grey);margin-bottom:8px;">All admins</div>
+    <div id="all-list"><div class="text-muted text-sm">Loading…</div></div>
+  </main>
+</div>
+
+<script>
+let token;
+
+async function init() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { location.href = "index.html"; return; }
+  token = session.access_token;
+
+  // Verify super admin
+  const me = await (await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })).json();
+  if (!me.is_super) { location.href = "dashboard.html"; return; }
+
+  loadAdmins();
+}
+
+async function loadAdmins() {
+  const all = await (await fetch(`${API_BASE}/auth/admins`, { headers: { Authorization: `Bearer ${token}` } })).json();
+  const pending = all.filter(a => !a.approved);
+  const approved = all.filter(a => a.approved);
+
+  const pendingEl = document.getElementById("pending-list");
+  if (!pending.length) {
+    pendingEl.innerHTML = `<div class="text-muted text-sm">No pending requests.</div>`;
+  } else {
+    pendingEl.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Email</th><th>Requested</th><th></th></tr></thead>
+        <tbody>${pending.map(a => `
+          <tr>
+            <td style="font-weight:500;">${a.name}</td>
+            <td class="text-sm text-muted">${a.email}</td>
+            <td class="text-sm text-muted">${new Date(a.created_at).toLocaleDateString()}</td>
+            <td style="display:flex;gap:6px;">
+              <button class="btn btn-primary" style="font-size:12px;padding:6px 14px;" onclick="approve('${a.id}')">Approve</button>
+              <button class="btn btn-ghost"   style="font-size:12px;padding:6px 14px;" onclick="revoke('${a.id}')">Decline</button>
+            </td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+  }
+
+  const allEl = document.getElementById("all-list");
+  allEl.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Since</th><th></th></tr></thead>
+      <tbody>${approved.map(a => `
+        <tr>
+          <td style="font-weight:500;">${a.name} ${a.is_super ? '<span class="badge badge-post">Super</span>' : ""}</td>
+          <td class="text-sm text-muted">${a.email}</td>
+          <td><span class="badge badge-done">Approved</span></td>
+          <td class="text-sm text-muted">${new Date(a.created_at).toLocaleDateString()}</td>
+          <td>${!a.is_super ? `<button class="btn btn-ghost" style="font-size:12px;padding:6px 14px;color:var(--spu-cardinal);" onclick="revoke('${a.id}')">Revoke</button>` : ""}</td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+async function approve(id) {
+  await fetch(`${API_BASE}/auth/approve`, {
+    method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},
+    body: JSON.stringify({ admin_id: id }),
+  });
+  showOk("Account approved.");
+  loadAdmins();
+}
+
+async function revoke(id) {
+  if (!confirm("Revoke this admin's access?")) return;
+  await fetch(`${API_BASE}/auth/revoke`, {
+    method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},
+    body: JSON.stringify({ admin_id: id }),
+  });
+  showOk("Access revoked.");
+  loadAdmins();
+}
+
+function showOk(msg) {
+  const el = document.getElementById("success-msg");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 3000);
+}
+
+document.getElementById("nav-signout").addEventListener("click", async () => {
+  await supabase.auth.signOut(); location.href = "index.html";
+});
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — Results</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+  <script src="../js/config.js"></script>
+  <style>
+    /* Composer */
+    .composer { display:grid; grid-template-columns:1fr 220px; gap:20px; align-items:start; }
+    .chart-toggle-row { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:var(--radius-md); border:1px solid transparent; cursor:pointer; transition:background .12s; }
+    .chart-toggle-row:hover { background:var(--spu-off); }
+    .chart-toggle-row.on { background:var(--spu-off); border-color:var(--spu-border); }
+    .toggle-switch { width:34px; height:19px; border-radius:10px; border:1px solid #D8D8D8; background:#F4F4F4; position:relative; cursor:pointer; flex-shrink:0; transition:background .15s; }
+    .toggle-switch.on { background:var(--spu-cardinal); border-color:var(--spu-cardinal); }
+    .toggle-dot { width:13px; height:13px; border-radius:50%; background:#fff; position:absolute; top:2px; left:2px; transition:left .15s; box-shadow:0 1px 2px rgba(0,0,0,.15); }
+    .toggle-switch.on .toggle-dot { left:17px; }
+    .unavail { opacity:.35; pointer-events:none; }
+    .q-block { border:1px solid #EBEBEB; border-radius:var(--radius-md); margin-bottom:10px; overflow:hidden; }
+    .q-block-header { padding:11px 14px; background:var(--spu-off); border-bottom:1px solid #EBEBEB; display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; }
+    .q-block-body { padding:8px 14px; }
+    .slide-sidebar { position:sticky; top:20px; }
+    .slide-item-row { font-size:11px; color:var(--spu-grey); padding:5px 8px; background:var(--spu-off); border-radius:var(--radius-sm); border-left:2px solid var(--spu-cardinal); margin-bottom:5px; display:flex; align-items:center; gap:5px; }
+
+    /* Slideshow */
+    .slideshow-overlay { display:none; position:fixed; inset:0; background:#1a0000; z-index:100; flex-direction:column; }
+    .slideshow-overlay.open { display:flex; }
+    .slideshow-header { display:flex; align-items:center; justify-content:space-between; padding:14px 24px; border-bottom:1px solid rgba(255,255,255,.1); }
+    .slide-area { flex:1; display:flex; align-items:center; justify-content:center; padding:24px; }
+    .slide-card { background:#fff; border-radius:var(--radius-lg); padding:32px 36px; width:100%; max-width:800px; min-height:400px; }
+    .slide-nav { display:flex; align-items:center; justify-content:space-between; padding:14px 24px; }
+    .slide-pips { display:flex; gap:6px; }
+    .slide-pip { width:24px; height:3px; border-radius:2px; background:rgba(255,255,255,.25); cursor:pointer; }
+    .slide-pip.active { background:#fff; }
+    .sankey-svg text { font-family: var(--font-ui); }
+  </style>
+</head>
+<body>
+<div class="admin-shell">
+  <nav class="admin-sidebar">
+    <div class="sidebar-logo">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <img src="../../elements/36.png" alt="SPU" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
+        <span class="wordmark" style="color:#fff;font-size:17px;">Spupoll<sup>™</sup></span>
+      </div>
+    </div>
+    <a href="session-new.html" class="nav-item"><i class="ti ti-plus"></i>New session</a>
+    <a href="dashboard.html"   class="nav-item"><i class="ti ti-list"></i>Sessions</a>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" id="nav-signout"><i class="ti ti-logout"></i>Sign out</div>
+  </nav>
+
+  <main class="admin-main">
+    <div id="loading" class="text-muted text-sm">Loading…</div>
+    <div id="page-content" class="hidden">
+
+      <div class="page-header">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <h2 id="page-title">Results composer</h2>
+            <p id="page-meta"></p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-outline" id="btn-pdf"><i class="ti ti-file-type-pdf"></i>Export PDF</button>
+            <a class="btn btn-ghost" id="btn-csv"><i class="ti ti-table"></i>Export CSV</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase selector for pre+post sessions -->
+      <div id="phase-selector" class="hidden mb-3" style="display:none;">
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary"  id="phase-btn-pre"  onclick="setPhase('pre')">Pre-discussion</button>
+          <button class="btn btn-ghost"    id="phase-btn-post" onclick="setPhase('post')">Post-discussion</button>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div id="composer-left"></div>
+
+        <!-- Slide sidebar -->
+        <div class="slide-sidebar">
+          <div class="text-sm text-muted mb-1" style="text-transform:uppercase;letter-spacing:.07em;font-size:10px;font-weight:600;">Slideshow</div>
+          <div class="stat-tile mb-2" style="text-align:center;">
+            <span class="num" id="slide-count">0</span>
+            <div class="lbl">slides</div>
+          </div>
+          <div id="slide-list" style="margin-bottom:12px;"></div>
+          <button class="btn btn-primary btn-full" id="btn-present"><i class="ti ti-presentation"></i>Present</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- Slideshow overlay -->
+<div class="slideshow-overlay" id="slideshow">
+  <div class="slideshow-header">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <img src="../../elements/36.png" alt="SPU" style="width:28px;height:28px;border-radius:50%;object-fit:cover;">
+      <span class="wordmark" style="color:#fff;font-size:16px;">Spupoll<sup>™</sup></span>
+    </div>
+    <div style="color:#fff;font-size:14px;opacity:.75;" id="ss-title"></div>
+    <button class="btn btn-ghost" onclick="closeSlideshow()" style="color:#fff;border-color:rgba(255,255,255,.2);">
+      <i class="ti ti-x"></i>Close
+    </button>
+  </div>
+  <div class="slide-area"><div class="slide-card" id="slide-card"></div></div>
+  <div class="slide-nav">
+    <button class="btn btn-ghost" onclick="prevSlide()" style="color:#fff;border-color:rgba(255,255,255,.2);"><i class="ti ti-arrow-left"></i>Prev</button>
+    <div class="slide-pips" id="slide-pips"></div>
+    <button class="btn btn-ghost" onclick="nextSlide()" style="color:#fff;border-color:rgba(255,255,255,.2);">Next<i class="ti ti-arrow-right"></i></button>
+  </div>
+</div>
+
+<script>
+const sessionId = new URLSearchParams(location.search).get("id");
+let token, session, questions, allResponses = [];
+let currentPhase = "post";
+let selections   = {};   // { qid: Set of chart names }
+let slides       = [];
+let ssIndex      = 0;
+
+// ── Chart availability rules ──────────────────────────────────
+const ORDINAL = new Set(["scale5","likert","slider"]);
+const LABEL   = new Set(["binary","mc"]);
+
+function availableCharts(template, phase, format) {
+  const charts = ["distribution"];
+  if (ORDINAL.has(template) && phase === "post" && format === "pre_post") charts.push("net_shift");
+  if (phase === "post" && format === "pre_post") charts.push("sankey");
+  if (LABEL.has(template)) charts.push("pie");
+  return charts;
+}
+
+const CHART_INFO = {
+  distribution: { icon: "ti-chart-bar",        label: "Distribution (Before & After)", phase: "both" },
+  sankey:        { icon: "ti-arrows-left-right", label: "Sankey — Movement map",         phase: "post" },
+  net_shift:     { icon: "ti-trending-up",       label: "Net shift",                      phase: "post" },
+  pie:           { icon: "ti-chart-pie",         label: "Pie — Before & After",           phase: "both" },
+};
+
+async function init() {
+  const { data: { session: s } } = await supabase.auth.getSession();
+  if (!s) { location.href = "index.html"; return; }
+  token = s.access_token;
+
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+  session   = await res.json();
+  questions = session.questions || [];
+
+  const { data } = await supabase.from("responses").select("*").eq("session_id", sessionId);
+  allResponses = data || [];
+
+  // Determine phase
+  if (session.format === "pre_post") {
+    document.getElementById("phase-selector").style.display = "flex";
+    // Default to post if complete, pre otherwise
+    currentPhase = session.status === "complete" ? "post" : "pre";
+  } else {
+    currentPhase = "pre";
+  }
+
+  // Init selections
+  questions.forEach(q => { selections[q.id] = new Set(["distribution"]); });
+
+  document.getElementById("page-title").textContent = `Results — ${session.title}`;
+  document.getElementById("page-meta").textContent  = `${allResponses.filter(r=>r.phase==="pre").length > 0 ? new Set(allResponses.filter(r=>r.phase==="pre").map(r=>r.device_id)).size : 0} participants`;
+  document.getElementById("ss-title").textContent   = session.title;
+  document.getElementById("btn-csv").href = `${API_BASE}/sessions/${sessionId}/results/csv`;
+  document.getElementById("btn-csv").setAttribute("headers", `Authorization: Bearer ${token}`);
+
+  renderComposer();
+  updateSidebar();
+  setPhase(currentPhase);
+
+  document.getElementById("loading").classList.add("hidden");
+  document.getElementById("page-content").classList.remove("hidden");
+}
+
+function setPhase(p) {
+  currentPhase = p;
+  document.getElementById("phase-btn-pre").className  = `btn ${p==="pre"  ? "btn-primary" : "btn-ghost"}`;
+  document.getElementById("phase-btn-post").className = `btn ${p==="post" ? "btn-primary" : "btn-ghost"}`;
+  renderComposer();
+  updateSidebar();
+}
+
+function renderComposer() {
+  const left = document.getElementById("composer-left");
+  left.innerHTML = "";
+
+  questions.forEach(q => {
+    const avail = availableCharts(q.template, currentPhase, session.format);
+    const block = document.createElement("div");
+    block.className = "q-block";
+    block.innerHTML = `
+      <div class="q-block-header">
+        <span>Q${q.order_index + 1}</span>
+        <span>${q.text}</span>
+        <span class="badge badge-draft" style="margin-left:auto;">${q.template}</span>
+      </div>
+      <div class="q-block-body">
+        ${Object.entries(CHART_INFO).map(([key, info]) => {
+          const isAvail = avail.includes(key);
+          const isOn    = selections[q.id]?.has(key);
+          return `
+            <div class="chart-toggle-row ${isOn ? "on" : ""} ${isAvail ? "" : "unavail"}" onclick="toggleChart('${q.id}','${key}',this)">
+              <div class="toggle-switch ${isOn ? "on" : ""}" id="toggle-${q.id}-${key}"><div class="toggle-dot"></div></div>
+              <i class="ti ${info.icon}" style="color:var(--spu-grey);font-size:16px;"></i>
+              <div>
+                <div style="font-size:12px;font-weight:500;color:var(--spu-black);">${info.label}</div>
+                ${!isAvail ? `<div class="text-sm text-muted">Not available for this question/phase combination</div>` : ""}
+              </div>
+              ${key === "sankey" ? `<span class="badge badge-post" style="margin-left:auto;">Post only</span>` : ""}
+            </div>`;
+        }).join("")}
+      </div>`;
+    left.appendChild(block);
+  });
+}
+
+function toggleChart(qid, chart, row) {
+  const sel = selections[qid];
+  const tog = document.getElementById(`toggle-${qid}-${chart}`);
+  if (sel.has(chart)) { sel.delete(chart); row.classList.remove("on"); tog.classList.remove("on"); }
+  else                { sel.add(chart);    row.classList.add("on");    tog.classList.add("on");    }
+  updateSidebar();
+}
+
+function updateSidebar() {
+  const list  = document.getElementById("slide-list");
+  const count = document.getElementById("slide-count");
+  list.innerHTML = "";
+  let n = 0;
+
+  questions.forEach(q => {
+    const avail = availableCharts(q.template, currentPhase, session.format);
+    selections[q.id]?.forEach(chart => {
+      if (!avail.includes(chart)) return;
+      const info = CHART_INFO[chart];
+      const row  = document.createElement("div");
+      row.className = "slide-item-row";
+      row.innerHTML = `<i class="ti ${info.icon}"></i>Q${q.order_index+1} ${info.label.split("—")[0].trim()}`;
+      list.appendChild(row);
+      n++;
+    });
+  });
+  count.textContent = n;
+}
+
+// ── Slideshow ─────────────────────────────────────────────────
+function buildSlides() {
+  slides = [];
+  questions.forEach(q => {
+    const avail   = availableCharts(q.template, currentPhase, session.format);
+    const qResps  = allResponses.filter(r => r.question_id === q.id);
+
+    selections[q.id]?.forEach(chart => {
+      if (!avail.includes(chart)) return;
+      slides.push({ question: q, chart, responses: qResps });
+    });
+  });
+}
+
+document.getElementById("btn-present").addEventListener("click", async () => {
+  // Save config first
+  const sels = questions.map(q => ({
+    question_id: q.id,
+    charts: [...(selections[q.id] || [])].filter(c => availableCharts(q.template, currentPhase, session.format).includes(c)),
+  }));
+  await fetch(`${API_BASE}/sessions/${sessionId}/results/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ phase: currentPhase, selections: sels }),
+  });
+
+  buildSlides();
+  if (!slides.length) { alert("Select at least one chart."); return; }
+  ssIndex = 0;
+  renderSlide();
+  renderPips();
+  document.getElementById("slideshow").classList.add("open");
+});
+
+document.getElementById("btn-pdf").addEventListener("click", async () => {
+  const sels = questions.map(q => ({
+    question_id: q.id,
+    charts: [...(selections[q.id] || [])].filter(c => availableCharts(q.template, currentPhase, session.format).includes(c)),
+  }));
+  await fetch(`${API_BASE}/sessions/${sessionId}/results/config`, {
+    method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},
+    body: JSON.stringify({ phase: currentPhase, selections: sels }),
+  });
+
+  const url = `${API_BASE}/sessions/${sessionId}/results/pdf?phase=${currentPhase}`;
+  const res  = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const blob = await res.blob();
+  const a    = document.createElement("a");
+  a.href     = URL.createObjectURL(blob);
+  a.download = `spupoll_${session.short_code}_${currentPhase}.pdf`;
+  a.click();
+});
+
+function closeSlideshow() { document.getElementById("slideshow").classList.remove("open"); }
+function prevSlide() { if (ssIndex > 0) { ssIndex--; renderSlide(); renderPips(); } }
+function nextSlide() { if (ssIndex < slides.length-1) { ssIndex++; renderSlide(); renderPips(); } }
+
+function renderPips() {
+  const pips = document.getElementById("slide-pips");
+  pips.innerHTML = slides.map((_,i) => `<div class="slide-pip${i===ssIndex?" active":""}" onclick="goSlide(${i})"></div>`).join("");
+}
+function goSlide(i) { ssIndex = i; renderSlide(); renderPips(); }
+
+function renderSlide() {
+  const slide = slides[ssIndex];
+  const card  = document.getElementById("slide-card");
+  card.innerHTML = `
+    <div style="font-size:11px;color:var(--spu-grey);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Q${slide.question.order_index+1}</div>
+    <div style="font-family:var(--font-display);font-size:18px;font-weight:700;color:var(--spu-black);margin-bottom:20px;line-height:1.4;">${slide.question.text}</div>
+    <div id="slide-vis"></div>`;
+
+  const vis = document.getElementById("slide-vis");
+
+  if (slide.chart === "distribution") renderDistribution(vis, slide);
+  else if (slide.chart === "sankey")  renderSankey(vis, slide);
+  else if (slide.chart === "net_shift") renderNetShift(vis, slide);
+  else if (slide.chart === "pie")     renderPie(vis, slide);
+}
+
+// ── Chart renderers ───────────────────────────────────────────
+function getLabels(q) {
+  if (["scale5","likert"].includes(q.template)) return ["1","2","3","4","5"];
+  if (q.template === "slider")                  return ["1","2","3","4","5"];
+  return q.options || [];
+}
+function getCounts(labels, resps, phase) {
+  const r = resps.filter(x => x.phase === phase);
+  return labels.map(l => r.filter(x => (x.template==="slider"? String(Math.min(5,Math.max(1,Math.ceil(parseFloat(x.value)/20)))) : x.value) === l).length);
+}
+
+function renderDistribution(el, slide) {
+  const labels = getLabels(slide.question);
+  const pre    = getCounts(labels, slide.responses, "pre");
+  const post   = getCounts(labels, slide.responses, "post");
+  const hasPost = post.some(v => v > 0);
+
+  el.innerHTML = `<canvas id="ss-chart" height="180"></canvas>`;
+  new Chart(document.getElementById("ss-chart").getContext("2d"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label:"Before", data: pre,  backgroundColor:"rgba(140,21,21,0.45)", borderRadius:4 },
+        ...(hasPost ? [{ label:"After", data: post, backgroundColor:"rgba(140,21,21,0.88)", borderRadius:4 }] : []),
+      ],
+    },
+    options: { responsive:true, plugins:{ legend:{ position:"top" } }, scales:{ x:{ grid:{ display:false } }, y:{ beginAtZero:true, ticks:{ stepSize:1 } } } },
+  });
+}
+
+function renderNetShift(el, slide) {
+  const preResps  = slide.responses.filter(r=>r.phase==="pre");
+  const postResps = slide.responses.filter(r=>r.phase==="post");
+  const mean = arr => arr.length ? arr.reduce((s,r)=>s+parseFloat(r.value),0)/arr.length : 0;
+  const preMean  = mean(preResps);
+  const postMean = mean(postResps);
+  const shift    = postMean - preMean;
+  const preMap   = Object.fromEntries(preResps.map(r=>[r.device_id, r.value]));
+  const postMap  = Object.fromEntries(postResps.map(r=>[r.device_id, r.value]));
+  const paired   = Object.keys(preMap).filter(d=>postMap[d]);
+  const changed  = paired.filter(d=>preMap[d]!==postMap[d]).length;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px;">
+      <div class="stat-tile"><span class="num">${preMean.toFixed(1)}</span><div class="lbl">Avg before</div></div>
+      <div class="stat-tile"><span class="num">${postMean.toFixed(1)}</span><div class="lbl">Avg after</div></div>
+      <div class="stat-tile"><span class="num" style="color:${shift>=0?'#3B6D11':'#8C1515'}">${shift>=0?"+":""}${shift.toFixed(1)}</span><div class="lbl">Net shift</div></div>
+      <div class="stat-tile"><span class="num">${paired.length?Math.round(changed/paired.length*100):0}%</span><div class="lbl">Changed opinion</div></div>
+    </div>`;
+}
+
+function renderSankey(el, slide) {
+  el.innerHTML = `<div id="sankey-wrap" style="width:100%;height:240px;"></div>`;
+  const resps   = slide.responses;
+  const labels  = getLabels(slide.question);
+  const preMap  = Object.fromEntries(resps.filter(r=>r.phase==="pre").map(r=>[r.device_id, r.value]));
+  const postMap = Object.fromEntries(resps.filter(r=>r.phase==="post").map(r=>[r.device_id, r.value]));
+  const flows   = {};
+  Object.keys(preMap).forEach(d => {
+    if (!postMap[d]) return;
+    const key = `${preMap[d]}->${postMap[d]}`;
+    flows[key] = (flows[key] || 0) + 1;
+  });
+
+  const nodeIndex = {};
+  const nodes = [
+    ...labels.map((l,i) => { nodeIndex[`pre_${l}`]=i; return { name: l }; }),
+    ...labels.map((l,i) => { nodeIndex[`post_${l}`]=labels.length+i; return { name: l }; }),
+  ];
+  const links = Object.entries(flows).map(([key, val]) => {
+    const [src, tgt] = key.split("->");
+    const si = labels.indexOf(src), ti = labels.indexOf(tgt);
+    const dir = ti > si ? "up" : ti < si ? "down" : "same";
+    return {
+      source: si,
+      target: labels.length + ti,
+      value:  val,
+      color:  dir==="up" ? "rgba(140,21,21,0.35)" : dir==="down" ? "rgba(83,74,183,0.35)" : "rgba(100,100,100,0.2)",
+    };
+  });
+
+  const wrap = document.getElementById("sankey-wrap");
+  const W = wrap.clientWidth || 700, H = 230;
+  const svg = d3.select(wrap).append("svg").attr("width",W).attr("height",H).attr("class","sankey-svg");
+
+  const sankey = d3.sankey()
+    .nodeWidth(14).nodePadding(10)
+    .extent([[20, 10],[W-20, H-10]]);
+
+  const { nodes: sNodes, links: sLinks } = sankey({ nodes: nodes.map(d=>Object.assign({},d)), links: links.map(d=>Object.assign({},d)) });
+
+  svg.append("g").selectAll("rect")
+    .data(sNodes).enter().append("rect")
+    .attr("x",d=>d.x0).attr("y",d=>d.y0).attr("height",d=>d.y1-d.y0).attr("width",d=>d.x1-d.x0)
+    .attr("fill","#8C1515").attr("opacity",0.8).attr("rx",2);
+
+  svg.append("g").attr("fill","none").selectAll("path")
+    .data(sLinks).enter().append("path")
+    .attr("d", d3.sankeyLinkHorizontal())
+    .attr("stroke", d => d.color).attr("stroke-width", d => Math.max(1, d.width))
+    .attr("opacity",0.85);
+
+  // Labels
+  svg.append("g").selectAll("text")
+    .data(sNodes).enter().append("text")
+    .attr("x", d => d.x0 < W/2 ? d.x0 - 6 : d.x1 + 6)
+    .attr("y", d => (d.y0 + d.y1)/2).attr("dy","0.35em")
+    .attr("text-anchor", d => d.x0 < W/2 ? "end" : "start")
+    .attr("font-size",11).attr("fill","#53565A")
+    .text(d=>d.name);
+}
+
+function renderPie(el, slide) {
+  const labels   = getLabels(slide.question);
+  const preCts   = getCounts(labels, slide.responses, "pre");
+  const postCts  = getCounts(labels, slide.responses, "post");
+  const hasPost  = postCts.some(v=>v>0);
+  const reds     = ["#8C1515","#B83A4B","#D47A7A","#E8ACAC","#F5D5D5","#4A1B0C"];
+
+  el.innerHTML = `<div style="display:flex;gap:20px;justify-content:center;">
+    <div style="width:200px;"><div style="text-align:center;font-size:12px;color:var(--spu-grey);margin-bottom:6px;">Before</div><canvas id="pie-pre"></canvas></div>
+    ${hasPost?`<div style="width:200px;"><div style="text-align:center;font-size:12px;color:var(--spu-grey);margin-bottom:6px;">After</div><canvas id="pie-post"></canvas></div>`:""}
+  </div>`;
+  new Chart(document.getElementById("pie-pre").getContext("2d"),{type:"pie",data:{labels,datasets:[{data:preCts,backgroundColor:reds}]},options:{plugins:{legend:{position:"bottom"}}}});
+  if (hasPost) new Chart(document.getElementById("pie-post").getContext("2d"),{type:"pie",data:{labels,datasets:[{data:postCts,backgroundColor:reds}]},options:{plugins:{legend:{position:"bottom"}}}});
+}
+
+// Keyboard nav
+document.addEventListener("keydown", e => {
+  if (!document.getElementById("slideshow").classList.contains("open")) return;
+  if (e.key === "ArrowRight") nextSlide();
+  if (e.key === "ArrowLeft")  prevSlide();
+  if (e.key === "Escape")     closeSlideshow();
+});
+
+document.getElementById("nav-signout").addEventListener("click", async () => {
+  await supabase.auth.signOut(); location.href = "index.html";
+});
+
+init();
+</script>
+</body>
+</html>

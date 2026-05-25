@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — New Session</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="../js/config.js"></script>
+  <style>
+    .format-opt { border:1.5px solid #D8D8D8; border-radius:var(--radius-md); padding:13px 15px; cursor:pointer; transition:border-color .14s,background .14s; }
+    .format-opt.active { border-color:var(--spu-cardinal); background:var(--spu-off); }
+    .format-opt h4 { font-size:13px; margin-bottom:3px; }
+    .format-opt p  { font-size:11px; color:var(--spu-grey); margin:0; }
+    .q-card { border:1px solid #EBEBEB; border-radius:var(--radius-md); padding:14px 16px; margin-bottom:8px; display:flex; align-items:flex-start; gap:12px; }
+    .q-card .q-drag { color:#D8D8D8; cursor:grab; font-size:18px; padding-top:2px; }
+    .q-card .q-body { flex:1; }
+    .q-card .q-type-badge { font-size:10px; color:var(--spu-grey); background:#F4F4F4; border-radius:4px; padding:2px 6px; }
+    .template-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; }
+    .tmpl-btn { border:1.5px solid #D8D8D8; border-radius:var(--radius-md); padding:10px 12px; cursor:pointer; text-align:left; background:#fff; transition:border-color .14s; font-family:var(--font-ui); }
+    .tmpl-btn:hover { border-color:var(--spu-cardinal); }
+    .tmpl-btn h5 { font-size:13px; margin-bottom:2px; color:var(--spu-black); }
+    .tmpl-btn p  { font-size:11px; color:var(--spu-grey); margin:0; }
+    #q-form { display:none; border:1px solid var(--spu-border); border-radius:var(--radius-md); padding:16px; margin-top:10px; background:var(--spu-off); }
+    .options-list { display:flex; flex-direction:column; gap:6px; }
+    .option-row { display:flex; gap:6px; align-items:center; }
+    .option-row input { flex:1; }
+    .option-row button { color:var(--spu-grey); background:none; border:none; cursor:pointer; font-size:16px; }
+  </style>
+</head>
+<body>
+<div class="admin-shell">
+  <nav class="admin-sidebar">
+    <div class="sidebar-logo">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <img src="../../elements/36.png" alt="SPU" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
+        <span class="wordmark" style="color:#fff;font-size:17px;">Spupoll<sup>™</sup></span>
+      </div>
+    </div>
+    <a href="session-new.html" class="nav-item active"><i class="ti ti-plus"></i>New session</a>
+    <a href="dashboard.html"   class="nav-item"><i class="ti ti-list"></i>Sessions</a>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" id="nav-signout"><i class="ti ti-logout"></i>Sign out</div>
+  </nav>
+
+  <main class="admin-main" style="max-width:720px;">
+    <div class="page-header">
+      <h2>New session</h2>
+      <p>Configure tonight's discussion poll.</p>
+    </div>
+
+    <div class="alert alert-error hidden" id="error-msg"></div>
+
+    <!-- Step 1: Title + Format -->
+    <div class="card mb-3">
+      <div class="form-row">
+        <label class="field-label">Session title</label>
+        <input type="text" id="title" placeholder="e.g. The Future of AI Regulation">
+      </div>
+      <div class="form-row" style="margin-bottom:0;">
+        <label class="field-label">Format</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="format-opt active" onclick="setFormat('pre_post',this)">
+            <h4>Pre + Post</h4>
+            <p>Participants answer before and after the discussion. Enables Sankey movement analysis.</p>
+          </div>
+          <div class="format-opt" onclick="setFormat('standalone',this)">
+            <h4>Standalone</h4>
+            <p>Single round of voting. No before/after comparison.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Questions -->
+    <div class="card mb-3">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:var(--spu-black);">Questions</div>
+          <div class="text-sm text-muted">Add the questions participants will answer.</div>
+        </div>
+      </div>
+
+      <div id="questions-list"></div>
+
+      <!-- Template picker -->
+      <div style="font-size:11px;font-weight:600;color:var(--spu-grey);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Add question</div>
+      <div class="template-grid">
+        <button class="tmpl-btn" onclick="openForm('scale5')">
+          <h5>Scale 1–5</h5><p>Intensity across 5 labelled steps</p>
+        </button>
+        <button class="tmpl-btn" onclick="openForm('likert')">
+          <h5>Agree – Disagree</h5><p>5-point statement evaluation</p>
+        </button>
+        <button class="tmpl-btn" onclick="openForm('binary')">
+          <h5>Binary</h5><p>Two custom options</p>
+        </button>
+        <button class="tmpl-btn" onclick="openForm('mc')">
+          <h5>Multiple choice</h5><p>3–6 custom options</p>
+        </button>
+        <button class="tmpl-btn" onclick="openForm('slider')">
+          <h5>Spectrum slider</h5><p>Continuous position between two poles</p>
+        </button>
+      </div>
+
+      <!-- Inline form -->
+      <div id="q-form">
+        <input type="hidden" id="q-template">
+        <div class="form-row">
+          <label class="field-label">Question text</label>
+          <input type="text" id="q-text" placeholder="e.g. To what extent should governments regulate AI?">
+        </div>
+        <div id="q-extra"></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary" onclick="addQuestion()">Add question</button>
+          <button class="btn btn-ghost" onclick="closeForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Launch -->
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-primary" id="launch-btn">Launch pre-discussion poll →</button>
+      <a href="dashboard.html" class="btn btn-ghost">Cancel</a>
+    </div>
+  </main>
+</div>
+
+<script>
+let token    = null;
+let format   = "pre_post";
+let questions = [];
+
+async function init() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) { location.href = "index.html"; return; }
+  token = session.access_token;
+}
+
+function setFormat(f, el) {
+  format = f;
+  document.querySelectorAll(".format-opt").forEach(o => o.classList.remove("active"));
+  el.classList.add("active");
+}
+
+const templateLabels = { scale5:"Scale 1–5", likert:"Agree–Disagree", binary:"Binary", mc:"Multiple choice", slider:"Spectrum" };
+
+function renderQuestions() {
+  const list = document.getElementById("questions-list");
+  if (!questions.length) { list.innerHTML = ""; return; }
+  list.innerHTML = questions.map((q, i) => `
+    <div class="q-card">
+      <div class="q-drag"><i class="ti ti-grip-vertical"></i></div>
+      <div class="q-body">
+        <div style="font-size:13px;color:var(--spu-black);">${q.text}</div>
+        <span class="q-type-badge">${templateLabels[q.template]}</span>
+      </div>
+      <button onclick="removeQuestion(${i})" style="background:none;border:none;cursor:pointer;color:var(--spu-grey);font-size:16px;"><i class="ti ti-trash"></i></button>
+    </div>
+  `).join("");
+}
+
+function openForm(tmpl) {
+  document.getElementById("q-template").value = tmpl;
+  document.getElementById("q-text").value      = "";
+  const extra = document.getElementById("q-extra");
+
+  if (tmpl === "scale5") {
+    extra.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="form-row">
+        <div><label class="field-label">Low label (1)</label><input type="text" id="anchor-lo" placeholder="Not at all"></div>
+        <div><label class="field-label">High label (5)</label><input type="text" id="anchor-hi" placeholder="Completely"></div>
+      </div>`;
+  } else if (tmpl === "likert") {
+    extra.innerHTML = `<div class="form-row"><div class="text-sm text-muted">Labels: Strongly disagree · Disagree · Neutral · Agree · Strongly agree</div></div>`;
+  } else if (tmpl === "binary") {
+    extra.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="form-row">
+        <div><label class="field-label">Option A</label><input type="text" id="bin-a" placeholder="Yes"></div>
+        <div><label class="field-label">Option B</label><input type="text" id="bin-b" placeholder="No"></div>
+      </div>`;
+  } else if (tmpl === "mc") {
+    extra.innerHTML = `
+      <div class="form-row">
+        <label class="field-label">Options</label>
+        <div class="options-list" id="mc-opts">
+          <div class="option-row"><input type="text" placeholder="Option 1"><button onclick="removeOpt(this)"><i class="ti ti-x"></i></button></div>
+          <div class="option-row"><input type="text" placeholder="Option 2"><button onclick="removeOpt(this)"><i class="ti ti-x"></i></button></div>
+          <div class="option-row"><input type="text" placeholder="Option 3"><button onclick="removeOpt(this)"><i class="ti ti-x"></i></button></div>
+        </div>
+        <button class="btn btn-ghost mt-1" style="font-size:12px;padding:6px 12px;" onclick="addOpt()"><i class="ti ti-plus"></i> Add option</button>
+      </div>`;
+  } else if (tmpl === "slider") {
+    extra.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" class="form-row">
+        <div><label class="field-label">Left pole</label><input type="text" id="anchor-lo" placeholder="Laissez-faire"></div>
+        <div><label class="field-label">Right pole</label><input type="text" id="anchor-hi" placeholder="Strict control"></div>
+      </div>`;
+  } else {
+    extra.innerHTML = "";
+  }
+
+  document.getElementById("q-form").style.display = "block";
+  document.getElementById("q-text").focus();
+}
+
+function closeForm() { document.getElementById("q-form").style.display = "none"; }
+
+function addOpt() {
+  const list = document.getElementById("mc-opts");
+  const row  = document.createElement("div");
+  row.className = "option-row";
+  row.innerHTML = `<input type="text" placeholder="Option"><button onclick="removeOpt(this)"><i class="ti ti-x"></i></button>`;
+  list.appendChild(row);
+}
+function removeOpt(btn) { btn.parentElement.remove(); }
+
+function addQuestion() {
+  const tmpl = document.getElementById("q-template").value;
+  const text = document.getElementById("q-text").value.trim();
+  if (!text) { alert("Enter a question."); return; }
+
+  const q = { template: tmpl, text, order_index: questions.length };
+
+  if (tmpl === "scale5" || tmpl === "slider") {
+    q.anchors = {
+      lo: document.getElementById("anchor-lo")?.value.trim() || "",
+      hi: document.getElementById("anchor-hi")?.value.trim() || "",
+    };
+  }
+  if (tmpl === "binary") {
+    q.options = [
+      document.getElementById("bin-a")?.value.trim() || "Yes",
+      document.getElementById("bin-b")?.value.trim() || "No",
+    ];
+  }
+  if (tmpl === "mc") {
+    q.options = Array.from(document.querySelectorAll("#mc-opts input")).map(i => i.value.trim()).filter(Boolean);
+    if (q.options.length < 2) { alert("Add at least 2 options."); return; }
+  }
+
+  questions.push(q);
+  renderQuestions();
+  closeForm();
+}
+
+function removeQuestion(i) { questions.splice(i, 1); renderQuestions(); }
+
+document.getElementById("launch-btn").addEventListener("click", async () => {
+  const title = document.getElementById("title").value.trim();
+  if (!title)           { showErr("Enter a session title."); return; }
+  if (!questions.length){ showErr("Add at least one question."); return; }
+
+  // Create session
+  const sessRes  = await fetch(`${API_BASE}/sessions`, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ title, format }),
+  });
+  if (!sessRes.ok) { showErr("Failed to create session."); return; }
+  const sess = await sessRes.json();
+
+  // Add questions
+  for (const q of questions) {
+    await fetch(`${API_BASE}/sessions/${sess.id}/questions`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(q),
+    });
+  }
+
+  // Launch: set status to pre_open
+  await fetch(`${API_BASE}/sessions/${sess.id}/status`, {
+    method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ status: "pre_open" }),
+  });
+
+  location.href = `session-live.html?id=${sess.id}`;
+});
+
+function showErr(msg) {
+  const el = document.getElementById("error-msg");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+document.getElementById("nav-signout").addEventListener("click", async () => {
+  await supabase.auth.signOut(); location.href = "index.html";
+});
+
+init();
+</script>
+</body>
+</html>

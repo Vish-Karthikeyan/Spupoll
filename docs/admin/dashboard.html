@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — Dashboard</title>
+  <link rel="stylesheet" href="../css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+<div class="admin-shell">
+  <!-- Sidebar -->
+  <nav class="admin-sidebar">
+    <div class="sidebar-logo">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <img src="../../elements/36.png" alt="SPU" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
+        <span class="wordmark" style="color:#fff;font-size:17px;">Spupoll<sup>™</sup></span>
+      </div>
+    </div>
+    <a href="session-new.html" class="nav-item"><i class="ti ti-plus"></i>New session</a>
+    <a href="dashboard.html"   class="nav-item active"><i class="ti ti-list"></i>Sessions</a>
+    <a href="accounts.html"    class="nav-item" id="nav-accounts" style="display:none;"><i class="ti ti-users"></i>Admins</a>
+    <div class="nav-spacer"></div>
+    <div class="nav-item" id="nav-signout"><i class="ti ti-logout"></i>Sign out</div>
+  </nav>
+
+  <!-- Main -->
+  <main class="admin-main">
+    <div class="page-header">
+      <h2>Sessions</h2>
+      <p>All your discussion polls, past and present.</p>
+    </div>
+
+    <a href="session-new.html" class="btn btn-primary mb-3" style="display:inline-flex;">
+      <i class="ti ti-plus"></i>New session
+    </a>
+
+    <div id="sessions-list">
+      <div class="text-muted text-sm">Loading…</div>
+    </div>
+  </main>
+</div>
+
+<script>
+  const statusLabels = {
+    draft:      "Draft",
+    pre_open:   "Pre-poll live",
+    pre_closed: "Pre-poll closed",
+    post_open:  "Post-poll live",
+    complete:   "Complete",
+  };
+  const statusBadge = {
+    draft:      "badge-draft",
+    pre_open:   "badge-live",
+    pre_closed: "badge-pre",
+    post_open:  "badge-live",
+    complete:   "badge-done",
+  };
+
+  async function init() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { location.href = "index.html"; return; }
+    const token = session.access_token;
+
+    // Check if super admin
+    const me = await (await fetch(`${API_BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    if (me.is_super) document.getElementById("nav-accounts").style.display = "flex";
+
+    // Load sessions
+    const res      = await fetch(`${API_BASE}/sessions`, { headers: { Authorization: `Bearer ${token}` } });
+    const sessions = await res.json();
+
+    const container = document.getElementById("sessions-list");
+    if (!sessions.length) {
+      container.innerHTML = `<div class="text-muted text-sm">No sessions yet. <a href="session-new.html" style="color:var(--spu-cardinal);">Create your first one →</a></div>`;
+      return;
+    }
+
+    container.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Code</th>
+            <th>Format</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sessions.map(s => `
+            <tr>
+              <td style="font-weight:500;">${s.title}</td>
+              <td><code style="font-size:12px;background:#F4F4F4;padding:2px 7px;border-radius:4px;">${s.short_code}</code></td>
+              <td class="text-sm text-muted">${s.format === "pre_post" ? "Pre + Post" : "Standalone"}</td>
+              <td><span class="badge ${statusBadge[s.status]}">${statusLabels[s.status]}</span></td>
+              <td class="text-sm text-muted">${new Date(s.created_at).toLocaleDateString()}</td>
+              <td>
+                ${s.status === "draft" ? `<a href="session-new.html?id=${s.id}" class="btn btn-ghost" style="padding:6px 12px;font-size:12px;">Edit</a>` : ""}
+                ${["pre_open","pre_closed","post_open"].includes(s.status) ? `<a href="session-live.html?id=${s.id}" class="btn btn-primary" style="padding:6px 12px;font-size:12px;">Live view</a>` : ""}
+                ${s.status === "complete" ? `<a href="session-results.html?id=${s.id}" class="btn btn-outline" style="padding:6px 12px;font-size:12px;">Results</a>` : ""}
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  document.getElementById("nav-signout").addEventListener("click", async () => {
+    await supabase.auth.signOut();
+    location.href = "index.html";
+  });
+
+  init();
+</script>
+</body>
+</html>

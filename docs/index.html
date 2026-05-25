@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spupoll — Stanford Political Union</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/fingerprint.js"></script>
+  <style>
+    body { background: var(--spu-cardinal); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+    .join-card { background: #fff; border-radius: var(--radius-lg); width: 100%; max-width: 400px; overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,0.18); }
+    .join-header { background: var(--spu-cardinal); padding: 28px 24px 32px; text-align: center; color: #fff; }
+    .join-body { padding: 24px; }
+    .spu-eyebrow { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; opacity: .7; margin-bottom: 10px; }
+    .session-box { background: var(--spu-off); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px; border: 1px solid var(--spu-border); }
+    #error-msg { display: none; }
+    #loading { text-align: center; padding: 40px; color: var(--spu-grey); }
+    #join-content { display: none; }
+  </style>
+</head>
+<body>
+  <div class="join-card">
+    <div class="join-header">
+      <div class="spu-eyebrow">Stanford Political Union</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:6px;">
+        <img src="../elements/36.png" alt="SPU Logo" style="width:42px;height:42px;border-radius:50%;object-fit:cover;">
+        <span class="wordmark" style="color:#fff;font-size:26px;">Spupoll<sup>™</sup></span>
+      </div>
+      <div style="font-size:12px;opacity:.75;">Live Discussion Polling</div>
+    </div>
+    <div class="join-body">
+      <div id="loading"><i class="ti ti-loader" style="font-size:24px;animation:spin 1s linear infinite;"></i></div>
+      <div class="alert alert-error" id="error-msg"></div>
+
+      <div id="join-content">
+        <div class="session-box">
+          <div style="font-size:10px;color:var(--spu-grey);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px;">Tonight's discussion</div>
+          <div style="font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--spu-black);line-height:1.35;" id="session-title"></div>
+          <div style="font-size:12px;color:var(--spu-grey);margin-top:4px;" id="session-date"></div>
+        </div>
+        <p class="text-sm text-muted mb-2">You'll answer a few questions before and after the discussion. Your responses are anonymous.</p>
+        <button class="btn btn-primary btn-full" id="join-btn">Join Discussion</button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+  <script>
+    const code = new URLSearchParams(location.search).get("code") || location.pathname.split("/s/")[1];
+
+    async function init() {
+      if (!code) {
+        showError("No session code found. Please scan a valid QR code.");
+        return;
+      }
+      try {
+        const res  = await fetch(`${API_BASE}/join/${code}`);
+        if (!res.ok) throw new Error("Session not found");
+        const sess = await res.json();
+
+        document.getElementById("session-title").textContent = sess.title;
+        document.getElementById("session-date").textContent  = new Date(sess.created_at).toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" });
+        document.getElementById("loading").classList.add("hidden");
+        document.getElementById("join-content").style.display = "block";
+
+        // Determine which poll phase is open
+        const phase = sess.status === "pre_open" ? "pre" : sess.status === "post_open" ? "post" : null;
+        if (!phase) {
+          showError("This session is not currently accepting responses. Check back soon.");
+          return;
+        }
+
+        document.getElementById("join-btn").addEventListener("click", () => {
+          location.href = `poll.html?code=${code}&phase=${phase}`;
+        });
+
+      } catch (e) {
+        showError(e.message);
+      }
+    }
+
+    function showError(msg) {
+      const el = document.getElementById("error-msg");
+      el.textContent = msg;
+      el.style.display = "block";
+      document.getElementById("loading").classList.add("hidden");
+    }
+
+    init();
+  </script>
+</body>
+</html>
