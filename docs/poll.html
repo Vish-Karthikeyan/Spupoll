@@ -48,6 +48,17 @@
   </div>
 </div>
 
+<div id="screen-already" class="p-shell hidden">
+  <div class="p-header" style="padding:64px 20px;text-align:center;">
+    <div style="font-size:42px;margin-bottom:14px;">✓</div>
+    <div style="font-family:var(--font-display);font-size:20px;font-weight:700;">Already responded.</div>
+  </div>
+  <div class="p-body text-center" style="padding-top:28px;">
+    <p class="text-sm text-muted">You've already submitted your response for this poll. No need to do it again.</p>
+    <div style="margin-top:40px;font-family:var(--font-display);font-size:11px;color:var(--spu-cardinal);opacity:.6;">Stanford Political Union · Est. 1938</div>
+  </div>
+</div>
+
 <div id="screen-done" class="p-shell hidden">
   <div class="p-header" style="padding:64px 20px;text-align:center;">
     <div style="font-family:var(--font-display);font-size:24px;font-weight:700;margin-bottom:8px;">Thank you.</div>
@@ -77,10 +88,17 @@ let selected  = null;
 async function init() {
   if (!code) { location.href = "index.html"; return; }
 
-  const res = await fetch(`${API_BASE}/join/${code}`);
+  const res = await fetch(`${API_BASE}/join/${code}?device_id=${encodeURIComponent(deviceId)}`);
   if (!res.ok) { location.href = "index.html"; return; }
   session   = await res.json();
   questions = session.questions || [];
+
+  // Block re-submission for this phase
+  if (session.device_responded && session.device_responded[phase]) {
+    hide("screen-loading");
+    show("screen-already");
+    return;
+  }
 
   // Subscribe to session status changes (real-time)
   supabase

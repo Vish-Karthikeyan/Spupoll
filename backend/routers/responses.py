@@ -19,7 +19,7 @@ class ResponseSubmit(BaseModel):
 
 
 @router.get("/{code}")
-def get_session_by_code(code: str):
+def get_session_by_code(code: str, device_id: Optional[str] = None):
     """Return session + questions for the given short_code. No auth."""
     db   = get_supabase_admin()
     resp = db.table("sessions") \
@@ -35,6 +35,22 @@ def get_session_by_code(code: str):
     sess = resp.data
     # Sort questions by order_index
     sess["questions"] = sorted(sess.get("questions", []), key=lambda q: q["order_index"])
+
+    # Check which phases this device has already completed
+    sess["device_responded"] = {"pre": False, "post": False}
+    if device_id:
+        existing = db.table("responses") \
+                     .select("phase") \
+                     .eq("session_id", sess["id"]) \
+                     .eq("device_id", device_id) \
+                     .execute()
+        phases_done = {r["phase"] for r in (existing.data or [])}
+        # A phase is "complete" if the device has answered all questions
+        q_count = len(sess["questions"])
+        for phase in ("pre", "post"):
+            phase_count = sum(1 for r in (existing.data or []) if r["phase"] == phase)
+            sess["device_responded"][phase] = (q_count > 0 and phase_count >= q_count)
+
     return sess
 
 
